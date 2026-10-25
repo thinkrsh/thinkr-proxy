@@ -112,13 +112,22 @@ describe('GET /api/models, the kinds', () => {
     const response = await createTestApp().app.request('/api/models?kinds=text,image,video');
     const { models } = (await response.json()) as ModelsResponse;
     const video = models.find((model) => model.id === VIDEO);
+    const perSecond = settingsOf(VIDEO).costUsd / 2;
     expect(video?.media).toEqual({
       aspectRatio: '16:9',
+      aspectRatios: ['16:9', '1:1', '9:16'],
+      durations: [2, 5, 10, 15].map((seconds) => ({
+        seconds,
+        priceUsd: mediaPriceUsd({ costUsd: perSecond * seconds }),
+      })),
       seconds: 2,
       resolution: '720p',
       audio: true,
       priceUsd: mediaPriceUsd(settingsOf(VIDEO)),
     });
+    const image = models.find((model) => model.id === ZDR_IMAGE)?.media;
+    expect(image?.aspectRatios).toEqual(['16:9', '1:1', '9:16']);
+    expect(image?.durations).toEqual([]);
     expect(models.find((model) => model.id === ZDR_IMAGE)?.media?.seconds).toBeNull();
     expect(models.some((model) => model.kind === 'text')).toBe(true);
   });
@@ -174,6 +183,34 @@ describe('POST /api/images', () => {
       n: 1,
     });
     expect(((await response.json()) as ImageResponse).images).toEqual([{ dataUrl: PNG }]);
+  });
+
+  it('makes the shape that the request picks, among those of the model', async () => {
+    const fetchMock = vi.fn<typeof fetch>(() => Promise.resolve(imageAnswer({ cost: 0.06 })));
+    const testApp = createTestApp(fetchMock);
+    const response = await post(testApp, MEDIA.imagesPath, {
+      modelId: ZDR_IMAGE,
+      prompt: 'A fox',
+      aspectRatio: '9:16',
+    });
+    expect(response.status).toBe(200);
+    expect((bodyOf(fetchMock) as ImageChatBody).image_config).toEqual({ aspect_ratio: '9:16' });
+  });
+
+  it('refuses a shape that the model does not offer, before calling OpenRouter', async () => {
+    const fetchMock = vi.fn<typeof fetch>(() => Promise.resolve(imageAnswer()));
+    const testApp = createTestApp(fetchMock);
+    const response = await post(testApp, MEDIA.imagesPath, {
+      modelId: ZDR_IMAGE,
+      prompt: 'A fox',
+      aspectRatio: '21:9',
+    });
+    expect(response.status).toBe(400);
+    expect(await errorOf(response)).toEqual({
+      code: 'invalid_request',
+      message: MESSAGES.shapeUnavailable,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('answers with the images as data URLs and the text, and drops any other link', async () => {
@@ -335,6 +372,39 @@ describe('POST /api/videos', () => {
       aspect_ratio: '16:9',
       generate_audio: true,
     });
+  });
+
+  it('makes the length and the shape that the request picks, and takes that price ahead', async () => {
+    const fetchMock = videoUpstream([{ status: 'pending' }]);
+    const testApp = createTestApp(fetchMock, { accessMode: 'trial' });
+    const secret = await fundedBalance(testApp.ledger, 1);
+    const response = await post(
+      testApp,
+      MEDIA.videosPath,
+      { modelId: VIDEO, prompt: 'Waves at dusk', seconds: 5, aspectRatio: '9:16' },
+      balanceHeader(secret),
+    );
+    expect(response.status).toBe(202);
+    const body = bodyOf(fetchMock) as VideoUpstreamBody;
+    expect(body.duration).toBe(5);
+    expect(body.aspect_ratio).toBe('9:16');
+    const fiveSeconds = mediaPriceUsd({ costUsd: (settingsOf(VIDEO).costUsd / 2) * 5 });
+    expect(await balanceOf(testApp, secret)).toBe(usdToMicros(1) - usdToMicros(fiveSeconds));
+  });
+
+  it('refuses a length that the model does not offer, before calling OpenRouter', async () => {
+    const fetchMock = videoUpstream([{ status: 'pending' }]);
+    const response = await post(createTestApp(fetchMock), MEDIA.videosPath, {
+      modelId: VIDEO,
+      prompt: 'Waves at dusk',
+      seconds: 7,
+    });
+    expect(response.status).toBe(400);
+    expect(await errorOf(response)).toEqual({
+      code: 'invalid_request',
+      message: MESSAGES.lengthUnavailable,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('takes the price, about, from the balance once the job starts', async () => {

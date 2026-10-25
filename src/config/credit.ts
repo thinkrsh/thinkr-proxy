@@ -7,6 +7,11 @@ export const CREDIT = {
   /** The value of one voucher in USD (docs/CONCEPT.md, section "Blind vouchers"). */
   voucherUsd: 1,
   /**
+   * What one holder voucher is worth when it fills a balance: $0.40 to start (decision 189). Must
+   * match HOLD.voucherUsd in apps/issuer/src/config/hold.ts.
+   */
+  holderVoucherUsd: 0.4,
+  /**
    * The quick choices of a top-up in the chat: $1, $5, or $20 (decision 64). A top-up may also buy
    * any other whole number of vouchers up to the cap below (the owner, 23 Oct 2026: "bikin custom
    * amount").

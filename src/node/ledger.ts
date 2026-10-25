@@ -6,7 +6,13 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
-import type { Ledger, MergeResult, RedeemResult } from '../credit/ledger.js';
+import type {
+  CreditUse,
+  HolderTotals,
+  Ledger,
+  MergeResult,
+  RedeemResult,
+} from '../credit/ledger.js';
 
 const IN_MEMORY = ':memory:';
 
@@ -20,6 +26,20 @@ const SCHEMA = `
   ) STRICT;
   CREATE TABLE IF NOT EXISTS settled_jobs (
     job_hash TEXT PRIMARY KEY
+  ) STRICT;
+  CREATE TABLE IF NOT EXISTS holder_balances (
+    balance_hash TEXT PRIMARY KEY,
+    micros INTEGER NOT NULL
+  ) STRICT;
+  CREATE TABLE IF NOT EXISTS holder_redeemed (
+    month TEXT PRIMARY KEY,
+    vouchers INTEGER NOT NULL
+  ) STRICT;
+  CREATE TABLE IF NOT EXISTS holder_spent (
+    month TEXT NOT NULL,
+    use TEXT NOT NULL CHECK (use IN ('chat', 'image', 'video')),
+    micros INTEGER NOT NULL,
+    PRIMARY KEY (month, use)
   ) STRICT;
 `;
 
@@ -41,6 +61,22 @@ export function openLedger(file: string): Ledger {
   );
   const closeBalance = db.prepare('DELETE FROM balances WHERE balance_hash = ?');
   const insertSettledJob = db.prepare('INSERT OR IGNORE INTO settled_jobs (job_hash) VALUES (?)');
+  const selectHolder = db.prepare('SELECT micros FROM holder_balances WHERE balance_hash = ?');
+  const fillHolder = db.prepare(
+    'INSERT INTO holder_balances (balance_hash, micros) VALUES (?, ?) ' +
+      'ON CONFLICT (balance_hash) DO UPDATE SET micros = micros + excluded.micros',
+  );
+  const closeHolder = db.prepare('DELETE FROM holder_balances WHERE balance_hash = ?');
+  const countRedeemed = db.prepare(
+    'INSERT INTO holder_redeemed (month, vouchers) VALUES (?, 1) ' +
+      'ON CONFLICT (month) DO UPDATE SET vouchers = vouchers + 1',
+  );
+  const countSpent = db.prepare(
+    'INSERT INTO holder_spent (month, use, micros) VALUES (?, ?, ?) ' +
+      'ON CONFLICT (month, use) DO UPDATE SET micros = micros + excluded.micros',
+  );
+  const selectRedeemed = db.prepare('SELECT month, vouchers FROM holder_redeemed ORDER BY month');
+  const selectSpent = db.prepare('SELECT month, use, micros FROM holder_spent ORDER BY month, use');
 
   const transaction = <T>(work: () => T, keep: (result: T) => boolean): T => {
     db.exec('BEGIN IMMEDIATE');
@@ -59,20 +95,39 @@ export function openLedger(file: string): Ledger {
     return typeof value === 'number' ? value : null;
   };
 
+  /** Takes a price from a balance, the credit of holder vouchers first, and counts that part. */
+  const take = (balanceHash: string, micros: number, use: CreditUse, at: number): void => {
+    chargeBalance.run(micros, balanceHash);
+    const holder = selectHolder.get(balanceHash)?.micros;
+    const fromHolder = typeof holder === 'number' ? Math.min(Math.max(holder, 0), micros) : 0;
+    if (fromHolder <= 0) return;
+    fillHolder.run(balanceHash, -fromHolder);
+    countSpent.run(monthOf(at), use, fromHolder);
+  };
+
   return {
-    redeem(voucherHash, balanceHash, micros): RedeemResult {
+    redeem(voucherHash, balanceHash, micros, holderMonth): RedeemResult {
       return transaction(
         (): RedeemResult => {
           if (insertSpent.run(voucherHash).changes === 0) return 'spent';
           fillBalance.run(balanceHash, micros);
+          if (holderMonth !== null) {
+            fillHolder.run(balanceHash, micros);
+            countRedeemed.run(holderMonth);
+          }
           return 'ok';
         },
         (result) => result === 'ok',
       );
     },
     balance,
-    charge(balanceHash, micros) {
-      chargeBalance.run(micros, balanceHash);
+    charge(balanceHash, micros, use, at) {
+      transaction(
+        () => {
+          take(balanceHash, micros, use, at);
+        },
+        () => true,
+      );
     },
     mergeBalance(fromHash, intoHash): MergeResult {
       return transaction(
@@ -81,22 +136,51 @@ export function openLedger(file: string): Ledger {
           if (micros === null) return 'unknown';
           fillBalance.run(intoHash, micros);
           closeBalance.run(fromHash);
+          const holder = selectHolder.get(fromHash)?.micros;
+          if (typeof holder === 'number') {
+            fillHolder.run(intoHash, holder);
+            closeHolder.run(fromHash);
+          }
           return 'ok';
         },
         (result) => result === 'ok',
       );
     },
-    settleJob(jobHash, balanceHash, refundMicros): boolean {
+    settleJob(jobHash, balanceHash, refundMicros, at): boolean {
       return transaction(
         () => {
           if (insertSettledJob.run(jobHash).changes === 0) return false;
-          if (balanceHash !== null && refundMicros !== 0) {
-            chargeBalance.run(-refundMicros, balanceHash);
-          }
+          if (balanceHash === null || refundMicros === 0) return true;
+          // A refund goes back as plain credit, so the totals keep the video as paid ahead.
+          if (refundMicros > 0) chargeBalance.run(-refundMicros, balanceHash);
+          else take(balanceHash, -refundMicros, 'video', at);
           return true;
         },
         (settled) => settled,
       );
     },
+    holderTotals(): HolderTotals {
+      return {
+        redeemed: selectRedeemed.all().map((row) => ({
+          month: String(row.month),
+          vouchers: Number(row.vouchers),
+        })),
+        spent: selectSpent.all().map((row) => ({
+          month: String(row.month),
+          use: useOf(row.use),
+          micros: Number(row.micros),
+        })),
+      };
+    },
   };
+}
+
+/** The month of UTC of a time, as "2026-10". */
+function monthOf(at: number): string {
+  return new Date(at).toISOString().slice(0, 'YYYY-MM'.length);
+}
+
+function useOf(value: unknown): CreditUse {
+  if (value === 'chat' || value === 'image' || value === 'video') return value;
+  throw new Error('The ledger holds a use of credit it does not know.');
 }

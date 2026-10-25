@@ -56,7 +56,7 @@ export async function finalizeVoucher(
 export async function signedVoucher(key: VoucherKey): Promise<Voucher> {
   const [blinded] = await blindVouchers(key, 1);
   if (blinded === undefined) throw new Error('No voucher was blinded.');
-  return finalizeVoucher(key, blinded, issuerBlindSign(blinded.blinded));
+  return finalizeVoucher(key, blinded, issuerBlindSign(key, blinded.blinded));
 }
 
 /** The body of POST /api/credit/redeem for a voucher. */

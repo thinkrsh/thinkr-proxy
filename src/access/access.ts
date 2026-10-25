@@ -1,7 +1,8 @@
 // Who may chat, with which model, and how much (decision 67). 'full' admits every chat. 'trial'
-// opens the models of config/trial.ts, counts the chats of each visitor, and pauses a lane past its
-// daily budget.
+// opens the models of config/trial.ts but the dearest, counts the chats of each visitor, and pauses
+// a lane past its daily budget.
 // Counts live in memory and start again at 00:00 UTC or when the proxy restarts.
+import { trialModelIds } from '../catalog.js';
 import { MESSAGES } from '../config/messages.js';
 import { TRIAL } from '../config/trial.js';
 import type { AccessMode, AccessStatus, Lane, LaneAccess } from '../contract.js';
@@ -46,7 +47,7 @@ interface Day {
   readonly spentUsd: Record<Lane, number>;
 }
 
-const TRIAL_MODELS: ReadonlySet<string> = new Set(TRIAL.modelIds);
+const TRIAL_MODELS: ReadonlySet<string> = new Set(trialModelIds());
 
 function utcDay(nowMs: number): string {
   return new Date(nowMs).toISOString().slice(0, 'YYYY-MM-DD'.length);

@@ -7,6 +7,7 @@ const LAPTOP = {
   TINFOIL_API_KEY: 'tk-test',
   ACCESS_MODE: 'full',
   VOUCHER_PUBLIC_KEY_FILE: '../../secret/voucher-dev-public.pem',
+  HOLDER_PUBLIC_KEYS_FILE: '../../secret/holder-public-keys-dev.json',
   TICKET_KEY_FILE: '../../secret/ticket-key-dev.txt',
   DATABASE_FILE: '.data/ledger.db',
 };
@@ -19,6 +20,7 @@ describe('readEnv', () => {
       accessMode: 'full',
       clientAddressHeader: null,
       voucherPublicKeyFile: '../../secret/voucher-dev-public.pem',
+      holderPublicKeysFile: '../../secret/holder-public-keys-dev.json',
       ticketKeyFile: '../../secret/ticket-key-dev.txt',
       databaseFile: '.data/ledger.db',
     });
@@ -34,7 +36,7 @@ describe('readEnv', () => {
 
   it('fails loudly and names every missing variable', () => {
     expect(() => readEnv({})).toThrow(
-      /OPENROUTER_API_KEY, TINFOIL_API_KEY, ACCESS_MODE, VOUCHER_PUBLIC_KEY_FILE, TICKET_KEY_FILE, DATABASE_FILE/,
+      /OPENROUTER_API_KEY, TINFOIL_API_KEY, ACCESS_MODE, VOUCHER_PUBLIC_KEY_FILE, HOLDER_PUBLIC_KEYS_FILE, TICKET_KEY_FILE, DATABASE_FILE/,
     );
   });
 

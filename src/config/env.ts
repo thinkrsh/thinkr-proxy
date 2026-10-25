@@ -18,6 +18,11 @@ const envSchema = z.object({
    * private key. The proxy holds no key that signs a voucher.
    */
   VOUCHER_PUBLIC_KEY_FILE: z.string().trim().min(1),
+  /**
+   * The public keys of holder vouchers, one for each month, as JSON: what
+   * `npm run holder-keys -- public` of apps/issuer prints (decision 189).
+   */
+  HOLDER_PUBLIC_KEYS_FILE: z.string().trim().min(1),
   /** The secret that seals the tickets of video jobs: 32 bytes in base64url, on one line. */
   TICKET_KEY_FILE: z.string().trim().min(1),
   /** The SQLite file of the ledger: vouchers spent, balances, and video jobs settled. */
@@ -31,6 +36,7 @@ export interface Env {
   readonly accessMode: AccessMode;
   readonly clientAddressHeader: string | null;
   readonly voucherPublicKeyFile: string;
+  readonly holderPublicKeysFile: string;
   readonly ticketKeyFile: string;
   readonly databaseFile: string;
 }
@@ -44,7 +50,7 @@ export function readEnv(source: EnvSource): Env {
     throw new Error(
       `Missing or invalid environment variable: ${names.join(', ')}. ` +
         'Keys go in secret/openrouter.env and secret/tinfoil.env, settings in apps/proxy/env/ ' +
-        '(on the laptop, the voucher key, the ticket key, and the ledger are named in ' +
+        '(on the laptop, the voucher keys, the ticket key, and the ledger are named in ' +
         'env/local.env) ' +
         '(see apps/proxy/.env.example).',
     );
@@ -55,6 +61,7 @@ export function readEnv(source: EnvSource): Env {
     accessMode: result.data.ACCESS_MODE,
     clientAddressHeader: result.data.CLIENT_ADDRESS_HEADER ?? null,
     voucherPublicKeyFile: result.data.VOUCHER_PUBLIC_KEY_FILE,
+    holderPublicKeysFile: result.data.HOLDER_PUBLIC_KEYS_FILE,
     ticketKeyFile: result.data.TICKET_KEY_FILE,
     databaseFile: result.data.DATABASE_FILE,
   };

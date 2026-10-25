@@ -5,6 +5,7 @@ import {
   privateDecrypt,
   randomBytes,
   randomUUID,
+  type KeyObject,
 } from 'node:crypto';
 
 import { vi } from 'vitest';
@@ -20,26 +21,45 @@ import type { SyncStore } from '../src/sync/store.js';
 import { readSseData } from '../src/lib/sse.js';
 import { openLedger } from '../src/node/ledger.js';
 import { openSyncStore } from '../src/node/sync-store.js';
+import { voucherKeysOf, type VoucherKey } from '../src/credit/voucher-key.js';
 import { voucherKeyFromPublicPem } from '../src/node/voucher-key.js';
 
 export const TEST_API_KEY = 'test-key';
 export const TEST_TINFOIL_KEY = 'test-tinfoil-key';
 export const TEST_CLIENT = 'client-1';
 
+/** The private keys of the tests by key id, as the issuer holds them. */
+const PRIVATE_KEYS = new Map<string, KeyObject>();
+
 /**
- * One key pair of vouchers for all the tests of a file, since making an RSA key takes a moment. The
+ * A key pair of vouchers for all the tests of a file, since making an RSA key takes a moment. The
  * proxy gets its public key, as from the issuer; the tests sign with its private key.
  */
-const TEST_KEY_PAIR = generateKeyPairSync('rsa', { modulusLength: VOUCHER_SIGNATURE.modulusBits });
+function testKey(): VoucherKey {
+  const pair = generateKeyPairSync('rsa', { modulusLength: VOUCHER_SIGNATURE.modulusBits });
+  const key = voucherKeyFromPublicPem(
+    pair.publicKey.export({ type: 'spki', format: 'pem' }) as string,
+  );
+  PRIVATE_KEYS.set(key.keyId, pair.privateKey);
+  return key;
+}
 
-export const TEST_VOUCHER_KEY = voucherKeyFromPublicPem(
-  TEST_KEY_PAIR.publicKey.export({ type: 'spki', format: 'pem' }) as string,
+/** The key of top-ups, and the holder key of October 2026. */
+export const TEST_VOUCHER_KEY = testKey();
+export const TEST_HOLDER_MONTH = '2026-10';
+export const TEST_HOLDER_KEY = testKey();
+export const TEST_VOUCHER_KEYS = voucherKeysOf(
+  TEST_VOUCHER_KEY,
+  new Map([[TEST_HOLDER_MONTH, TEST_HOLDER_KEY]]),
 );
 
-/** Signs one blinded voucher as the issuer does (apps/issuer/src/node/voucher-key.ts). */
-export function issuerBlindSign(blinded: Uint8Array): Uint8Array {
-  const raw = { key: TEST_KEY_PAIR.privateKey, padding: constants.RSA_NO_PADDING };
-  return new Uint8Array(privateDecrypt(raw, blinded));
+/** Signs one blinded voucher with a key, as the issuer does (apps/issuer/src/node/voucher-key.ts). */
+export function issuerBlindSign(key: VoucherKey, blinded: Uint8Array): Uint8Array {
+  const privateKey = PRIVATE_KEYS.get(key.keyId);
+  if (privateKey === undefined) throw new Error('The tests hold no private key of this key.');
+  return new Uint8Array(
+    privateDecrypt({ key: privateKey, padding: constants.RSA_NO_PADDING }, blinded),
+  );
 }
 
 /** The secret that seals the tickets of video jobs in the tests. */
@@ -48,7 +68,7 @@ export const TEST_TICKET_KEY = new Uint8Array(randomBytes(MEDIA.ticket.keyBytes)
 /** A balance with this much credit, as if a voucher had opened it. Returns its secret. */
 export async function fundedBalance(ledger: Ledger, usd: number): Promise<string> {
   const secret = newBalanceSecret();
-  ledger.redeem(randomUUID(), await balanceHash(secret), usdToMicros(usd));
+  ledger.redeem(randomUUID(), await balanceHash(secret), usdToMicros(usd), null);
   return secret;
 }
 
@@ -142,11 +162,12 @@ export function createTestApp(
       accessMode: options.accessMode ?? 'full',
       clientAddressHeader: null,
       voucherPublicKeyFile: 'unused-in-tests.pem',
+      holderPublicKeysFile: 'unused-in-tests.json',
       ticketKeyFile: 'unused-in-tests.txt',
       databaseFile: ':memory:',
     },
     ledger,
-    voucherKey: TEST_VOUCHER_KEY,
+    voucherKeys: TEST_VOUCHER_KEYS,
     ticketKey: TEST_TICKET_KEY,
     syncStore,
     fetch: fetchMock,

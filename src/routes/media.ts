@@ -25,6 +25,7 @@ import { parseBody, readJson } from '../lib/body.js';
 import { answerSpend } from '../lib/cost.js';
 import { ProxyError, errorBody } from '../lib/errors.js';
 import type { RateLimiter } from '../lib/rate-limit.js';
+import { chosenImage, chosenVideo } from '../media/choice.js';
 import { generateImage, type ImageResult } from '../media/image.js';
 import { createTicketSealer, type JobClaims, type TicketSealer } from '../media/ticket.js';
 import type { MediaPrompt } from '../media/upstream.js';
@@ -72,7 +73,9 @@ export function createMediaRoute(deps: MediaRouteDeps): Hono {
 async function makeImage(deps: MediaRouteDeps, c: Context): Promise<ImageResponse> {
   const visitor = take(deps.limiter, deps, c);
   const request = parseBody(mediaRequestSchema, await readJson(c));
-  const { model, slug, settings } = servableImageModel(request.modelId);
+  const servable = servableImageModel(request.modelId);
+  const { model, slug } = servable;
+  const settings = chosenImage(servable.settings, request);
   const balance = await deps.gate.balanceOf(c);
   const ticket = deps.gate.admit({ visitor, balance }, model, request.prompt.length);
   let result: ImageResult;
@@ -105,7 +108,9 @@ async function startVideo(
 ): Promise<VideoJobResponse> {
   const visitor = take(deps.limiter, deps, c);
   const request = parseBody(mediaRequestSchema, await readJson(c));
-  const { model, slug, settings } = servableVideoModel(request.modelId);
+  const servable = servableVideoModel(request.modelId);
+  const { model, slug } = servable;
+  const settings = chosenVideo(servable.settings, request);
   const balance = await deps.gate.balanceOf(c);
   const admitted = deps.gate.admitPrepaid(
     { visitor, balance },

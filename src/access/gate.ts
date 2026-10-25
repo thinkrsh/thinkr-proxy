@@ -160,7 +160,8 @@ export function createGate(deps: GateDeps): Gate {
       return {
         refund: () => undefined,
         charge: (spend) => {
-          deps.ledger.charge(balance.hash, chatPriceMicros(model, spend));
+          const use = model.info.kind === 'image' ? 'image' : 'chat';
+          deps.ledger.charge(balance.hash, chatPriceMicros(model, spend), use, deps.now());
         },
       };
     },
@@ -172,7 +173,7 @@ export function createGate(deps: GateDeps): Gate {
       return {
         refund: () => undefined,
         charge: () => {
-          deps.ledger.charge(balance.hash, price);
+          deps.ledger.charge(balance.hash, price, 'chat', deps.now());
         },
       };
     },
@@ -189,7 +190,8 @@ export function createGate(deps: GateDeps): Gate {
       return {
         refund: () => undefined,
         charge: (reportedCostUsd) => {
-          deps.ledger.charge(balance.hash, premiumPriceMicros(price, reportedCostUsd));
+          const micros = premiumPriceMicros(price, reportedCostUsd);
+          deps.ledger.charge(balance.hash, micros, 'chat', deps.now());
         },
       };
     },
@@ -202,7 +204,7 @@ export function createGate(deps: GateDeps): Gate {
       if (balance.micros < priceMicros) throw new ProxyError('balance_low', MESSAGES.balanceLow);
       return {
         pay: () => {
-          deps.ledger.charge(balance.hash, priceMicros);
+          deps.ledger.charge(balance.hash, priceMicros, 'video', deps.now());
           return { balanceHash: balance.hash, micros: priceMicros };
         },
       };
@@ -212,6 +214,7 @@ export function createGate(deps: GateDeps): Gate {
         await jobHash(jobId),
         prepayment.balanceHash,
         prepayment.micros - finalMicros,
+        deps.now(),
       );
     },
   };

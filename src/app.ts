@@ -8,7 +8,7 @@ import type { Env } from './config/env.js';
 import type { ErrorCode } from './contract.js';
 import type { Ledger } from './credit/ledger.js';
 import type { SyncStore } from './sync/store.js';
-import type { VoucherKey } from './credit/voucher-key.js';
+import type { VoucherKeys } from './credit/voucher-key.js';
 import { MESSAGES } from './config/messages.js';
 import { SERVER } from './config/server.js';
 import { LIMITS } from './config/limits.js';
@@ -38,8 +38,8 @@ export interface AppDeps {
   readonly log: LogLine;
   /** Vouchers spent, balances, and video jobs settled. */
   readonly ledger: Ledger;
-  /** Checks the blind vouchers of credit: the public key of the issuer (apps/issuer/). */
-  readonly voucherKey: VoucherKey;
+  /** Check the blind vouchers of credit: the public keys of the issuer (apps/issuer/). */
+  readonly voucherKeys: VoucherKeys;
   /** The secret that seals the tickets of video jobs. */
   readonly ticketKey: Uint8Array;
   /** The encrypted backups of the app, which the proxy cannot read. */

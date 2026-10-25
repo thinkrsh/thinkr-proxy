@@ -6,6 +6,7 @@ import {
   MODEL_CATALOG,
   type CatalogModel,
   type MediaSettings,
+  type VideoSettings,
 } from './config/models.js';
 import { TRIAL } from './config/trial.js';
 import type {
@@ -17,6 +18,8 @@ import type {
   PrivacyLevel,
 } from './contract.js';
 import { mediaPriceUsd, userPricing } from './credit/balance.js';
+import { tokensUsd } from './lib/cost.js';
+import { videoCostUsd } from './media/choice.js';
 
 const PRIVACY_BY_LANE: Readonly<Record<Lane, readonly PrivacyLevel[]>> = {
   open: ['open', 'open-no-retention'],
@@ -62,13 +65,19 @@ function listedModel(model: CatalogModel, access: Pick<Access, 'opens'>): Listed
   };
 }
 
-/** One image or one video as the app shows it, at the price that the user pays, about. */
+/**
+ * One image or one video as the app shows it, at the price that the user pays, about, with the
+ * shapes and the lengths that the user may pick, each length at its own price.
+ */
 function mediaInfo(media: MediaSettings | undefined): MediaInfo | null {
   if (media === undefined) return null;
   const priceUsd = mediaPriceUsd(media);
+  const aspectRatios = [...media.aspectRatios];
   if (media.kind === 'image') {
     return {
       aspectRatio: media.aspectRatio,
+      aspectRatios,
+      durations: [],
       seconds: null,
       resolution: null,
       audio: false,
@@ -76,11 +85,33 @@ function mediaInfo(media: MediaSettings | undefined): MediaInfo | null {
     };
   }
   const { aspectRatio, seconds, resolution, audio } = media;
-  return { aspectRatio, seconds, resolution, audio, priceUsd };
+  const durations = media.durations.map((length) => ({
+    seconds: length,
+    priceUsd: mediaPriceUsd({ costUsd: videoCostUsd(media, length) }),
+  }));
+  return { aspectRatio, aspectRatios, durations, seconds, resolution, audio, priceUsd };
 }
 
 export function findModel(id: string): CatalogModel | undefined {
   return MODEL_CATALOG.find((model) => model.info.id === id);
+}
+
+/**
+ * True for a model that costs more than the free trial allows (config/trial.ts, `dearest`): one
+ * image, or one chat of the trial's fallback usage at the price that the user pays.
+ */
+export function isDearest(model: Pick<CatalogModel, 'cost' | 'price' | 'media'>): boolean {
+  if (model.media !== undefined) return mediaPriceUsd(model.media) > TRIAL.dearest.imageUsd;
+  const pricing = userPricing(model);
+  return pricing !== null && tokensUsd(TRIAL.fallbackUsage, pricing) > TRIAL.dearest.chatUsd;
+}
+
+/** The models that the free trial opens: those of config/trial.ts but the dearest. */
+export function trialModelIds(): string[] {
+  return TRIAL.modelIds.filter((id) => {
+    const model = findModel(id);
+    return model !== undefined && !isDearest(model);
+  });
 }
 
 /** The model of the private lane that a sealed request names in its model header. */
@@ -162,6 +193,23 @@ function mediaProblems({ info, media }: CatalogModel): string[] {
   if (media?.kind === 'image' && media.api.name !== 'chat' && info.privacy !== 'open') {
     problems.push(`${info.id}: only a chat completion forces zero data retention on an image`);
   }
+  if (media !== undefined && !media.aspectRatios.includes(media.aspectRatio)) {
+    problems.push(`${info.id}: its shapes must hold its default shape`);
+  }
+  if (media?.kind === 'video') problems.push(...durationProblems(info.id, media));
+  return problems;
+}
+
+/** A video offers its default length, and its lengths run from the shortest up. */
+function durationProblems(id: string, media: VideoSettings): string[] {
+  const { durations, seconds } = media;
+  const problems: string[] = [];
+  if (!durations.includes(seconds)) {
+    problems.push(`${id}: its lengths must hold its default length`);
+  }
+  if (durations.some((length, index) => index > 0 && length <= (durations[index - 1] ?? 0))) {
+    problems.push(`${id}: its lengths must run from the shortest up`);
+  }
   return problems;
 }
 
@@ -184,7 +232,7 @@ export function trialProblems(
 export function assertCatalogIsValid(): void {
   const problems = [
     ...catalogProblems(MODEL_CATALOG, DEFAULT_MODEL_ID),
-    ...trialProblems(MODEL_CATALOG, DEFAULT_MODEL_ID, TRIAL.modelIds),
+    ...trialProblems(MODEL_CATALOG, DEFAULT_MODEL_ID, trialModelIds()),
   ];
   if (problems.length > 0) throw new Error(`Invalid model catalog: ${problems.join('; ')}.`);
 }

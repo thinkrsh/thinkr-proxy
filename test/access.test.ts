@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { createAccess } from '../src/access/access.js';
+import { isDearest } from '../src/catalog.js';
 import { MESSAGES } from '../src/config/messages.js';
 import { MODEL_CATALOG } from '../src/config/models.js';
 import { TRIAL } from '../src/config/trial.js';
@@ -37,10 +38,12 @@ describe('createAccess, full', () => {
 });
 
 describe('createAccess, trial', () => {
-  it('opens every model that the proxy serves but video, and nothing else', () => {
+  it('opens every model that the proxy serves but video and the dearest, and nothing else', () => {
     const { access } = trial();
-    for (const { info } of MODEL_CATALOG) {
-      expect(access.opens(info.id)).toBe(info.available && info.kind !== 'video');
+    for (const model of MODEL_CATALOG) {
+      const { info } = model;
+      const open = info.available && info.kind !== 'video' && !isDearest(model);
+      expect(access.opens(info.id), info.id).toBe(open);
     }
     expect(access.opens('open/not-in-the-catalog')).toBe(false);
   });

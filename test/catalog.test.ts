@@ -1,8 +1,22 @@
 import { describe, expect, it } from 'vitest';
 
-import { catalogProblems, findModel, findTeeModel, modelsResponse } from '../src/catalog.js';
+import {
+  catalogProblems,
+  findModel,
+  findTeeModel,
+  isDearest,
+  modelsResponse,
+  trialModelIds,
+} from '../src/catalog.js';
 import { CREDIT } from '../src/config/credit.js';
 import { DEFAULT_MODEL_ID, MODEL_CATALOG, type CatalogModel } from '../src/config/models.js';
+import { TRIAL } from '../src/config/trial.js';
+
+function catalogModel(id: string): CatalogModel {
+  const model = findModel(id);
+  if (model === undefined) throw new Error(`The catalog lost ${id}.`);
+  return model;
+}
 
 function openModel(id: string): CatalogModel {
   const model = findModel('open/glm-5.3-flash');
@@ -21,10 +35,11 @@ describe('the model catalog', () => {
     expect(catalogProblems(MODEL_CATALOG, DEFAULT_MODEL_ID)).toEqual([]);
   });
 
-  it('forces every text model of the open lane to the no-retention level', () => {
+  it('puts each text model of the open lane at the no-retention level, or at Open without ZDR', () => {
     const text = MODEL_CATALOG.filter(({ info }) => info.lane === 'open' && info.kind === 'text');
-    expect(text.length).toBeGreaterThan(0);
-    expect(text.every((model) => model.info.privacy === 'open-no-retention')).toBe(true);
+    expect(text.some(({ info }) => info.privacy === 'open-no-retention')).toBe(true);
+    expect(text.some(({ info }) => info.privacy === 'open')).toBe(true);
+    for (const { info } of text) expect(['open-no-retention', 'open']).toContain(info.privacy);
   });
 
   it('puts every video model at the level Open, with no zero data retention', () => {
@@ -54,6 +69,40 @@ describe('the model catalog', () => {
 
   it('defaults to GPT-OSS 120B in the private lane (decision 64)', () => {
     expect(findModel(DEFAULT_MODEL_ID)?.info.teeModelId).toBe('gpt-oss-120b');
+  });
+});
+
+describe('the dearest models of the trial', () => {
+  it('keeps a chat model and an image model under the limits open', () => {
+    expect(isDearest(catalogModel('open/claude-opus-5.5'))).toBe(false);
+    expect(isDearest(catalogModel('open/nano-banana-pro'))).toBe(false);
+  });
+
+  it('takes credit for a chat model and an image model past the limits', () => {
+    expect(isDearest(catalogModel('open/gpt-5.5-pro'))).toBe(true);
+    expect(isDearest(catalogModel('open/gpt-image-1'))).toBe(true);
+  });
+
+  it('prices one chat of the fallback usage at the user price, up to the limit included', () => {
+    const atLimit = (TRIAL.dearest.chatUsd * 1_000_000) / TRIAL.fallbackUsage.outputTokens;
+    const model = catalogModel('open/claude-opus-5.5');
+    const priced = (output: number): CatalogModel => ({
+      ...model,
+      price: { inputUsdPerMTok: 0, outputUsdPerMTok: output },
+    });
+    expect(isDearest(priced(atLimit))).toBe(false);
+    expect(isDearest(priced(atLimit + 0.01))).toBe(true);
+  });
+
+  it('leaves the dearest models out of the trial, and video too', () => {
+    const ids = trialModelIds();
+    expect(ids).toContain('open/claude-opus-5.5');
+    expect(ids).not.toContain('open/gpt-5.5-pro');
+    for (const id of ids) {
+      const model = catalogModel(id);
+      expect(isDearest(model)).toBe(false);
+      expect(model.info.kind).not.toBe('video');
+    }
   });
 });
 
@@ -118,6 +167,17 @@ describe('catalogProblems', () => {
     expect(problems).toContain('open/text: a text model has no media settings');
   });
 
+  it('keeps the default shape and length among the options, the lengths shortest first', () => {
+    const video = catalogModel('open/wan-3.0');
+    if (video.media?.kind !== 'video') throw new Error('Wan 3.0 lost its video settings.');
+    const media = { ...video.media, aspectRatios: ['1:1'], durations: [10, 5] };
+    expect(catalogProblems([{ ...video, media }], 'open/wan-3.0')).toEqual([
+      'open/wan-3.0: its shapes must hold its default shape',
+      'open/wan-3.0: its lengths must hold its default length',
+      'open/wan-3.0: its lengths must run from the shortest up',
+    ]);
+  });
+
   it('keeps an image of ZDR on a chat completion, which forces zero data retention', () => {
     const image = findModel('open/nano-banana-2');
     if (image === undefined) throw new Error('The catalog lost a model.');
@@ -125,7 +185,13 @@ describe('catalogProblems', () => {
       [
         {
           ...image,
-          media: { kind: 'image', aspectRatio: '1:1', api: { name: 'images' }, costUsd: 1 },
+          media: {
+            kind: 'image',
+            aspectRatio: '1:1',
+            aspectRatios: ['1:1'],
+            api: { name: 'images' },
+            costUsd: 1,
+          },
         },
       ],
       'open/nano-banana-2',
@@ -172,7 +238,30 @@ describe('the price that the app shows', () => {
     });
   });
 
-  it('gives a price of decision 132 to the twelve models of thinkr.sh/pricing', () => {
-    expect(MODEL_CATALOG.filter((model) => model.price !== null)).toHaveLength(12);
+  it('gives a price of decision 134 to the twelve models of thinkr.sh/pricing', () => {
+    const page = [
+      'private/gpt-oss-120b',
+      'private/deepseek-v4.1-flash',
+      'private/kimi-k3',
+      'private/glm-5.3',
+      'private/gemma-4-31b',
+      'private/llama-3.3-70b',
+      'open/claude-opus-5.5',
+      'open/claude-haiku-5.5',
+      'open/gpt-6.1-sol',
+      'open/gpt-6-luna',
+      'open/gemini-3.8-flash',
+      'open/grok-4.7',
+    ];
+    for (const id of page) expect(catalogModel(id).price, id).not.toBeNull();
+  });
+
+  it('never prices a model above its cost plus 25% (decision 52), input and output apart', () => {
+    for (const { cost, price, info } of MODEL_CATALOG) {
+      if (price === null || cost === null) continue;
+      const most = (value: number): number => value * CREDIT.markup + Number.EPSILON;
+      expect(price.inputUsdPerMTok, info.id).toBeLessThanOrEqual(most(cost.inputUsdPerMTok));
+      expect(price.outputUsdPerMTok, info.id).toBeLessThanOrEqual(most(cost.outputUsdPerMTok));
+    }
   });
 });

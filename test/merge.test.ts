@@ -58,9 +58,9 @@ describe('a merge of two balances', () => {
 describe('the merge in the ledger', () => {
   it('moves a debt along, and changes nothing for a balance that does not exist', () => {
     const ledger = openLedger(':memory:');
-    ledger.redeem('voucher-1', 'stays', usdToMicros(1));
-    ledger.redeem('voucher-2', 'closes', usdToMicros(1));
-    ledger.charge('closes', usdToMicros(1.5));
+    ledger.redeem('voucher-1', 'stays', usdToMicros(1), null);
+    ledger.redeem('voucher-2', 'closes', usdToMicros(1), null);
+    ledger.charge('closes', usdToMicros(1.5), 'chat', Date.UTC(2026, 9, 24));
     expect(ledger.mergeBalance('closes', 'stays')).toBe('ok');
     expect(ledger.balance('stays')).toBe(usdToMicros(0.5));
     expect(ledger.balance('closes')).toBeNull();

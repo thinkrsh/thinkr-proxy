@@ -52,10 +52,20 @@ export interface ModelPricing {
 export const MODEL_KINDS = ['text', 'image', 'video'] as const;
 export type ModelKind = (typeof MODEL_KINDS)[number];
 
+/** One length of a video that the user may pick, and what that video costs the user, about. */
+export interface DurationOption {
+  seconds: number;
+  priceUsd: number;
+}
+
 /** One image or one video of a model, at the settings that the proxy sends (23 Oct 2026). */
 export interface MediaInfo {
-  /** The shape of the frame, such as '16:9'. */
+  /** The shape of the frame when the user picks none, such as '16:9'. */
   aspectRatio: string;
+  /** The shapes that the user may pick, the default among them (25 Oct 2026). */
+  aspectRatios: string[];
+  /** The lengths of a video that the user may pick, shortest first; empty for an image. */
+  durations: DurationOption[];
   /** The length of a video in seconds; null for an image. */
   seconds: number | null;
   /** The resolution of a video, such as '720p'; null for an image. */
@@ -179,6 +189,11 @@ export interface CreditKeyResponse {
    * token that pays, with THKR while payment in THKR is open.
    */
   payment: { network: string; token: string; tokens: string[]; testnet: boolean };
+  /**
+   * The keys of holder vouchers that the proxy takes, one for each month, with what one of their
+   * vouchers is worth (decision 189), so that the app counts the credit of each voucher it holds.
+   */
+  holderKeys: { keyId: string; month: string; voucherUsd: number }[];
 }
 
 /** POST /api/credit/redeem: one voucher, spent into a balance. */
@@ -212,6 +227,15 @@ export const mergeRequestSchema = z.strictObject({
 });
 
 export type MergeRequest = z.infer<typeof mergeRequestSchema>;
+
+/**
+ * GET /api/credit/holder-totals: the holder vouchers spent into balances, by the month of their
+ * key, and what their credit paid for, by the month of the payment, with no balance (decision 191).
+ */
+export interface HolderTotalsResponse {
+  redeemed: { month: string; vouchers: number }[];
+  spent: { month: string; use: 'chat' | 'image' | 'video'; usd: number }[];
+}
 
 export interface MergeResponse {
   /** What the balance that stays holds now. */
@@ -280,6 +304,13 @@ export const mediaRequestSchema = z.strictObject({
    * video.
    */
   image: imageDataUrlSchema.optional(),
+  /** The shape that the user picked, one of the model's (25 Oct 2026); else its default. */
+  aspectRatio: z
+    .string()
+    .regex(/^\d{1,2}:\d{1,2}$/, MESSAGES.shapeUnavailable)
+    .optional(),
+  /** The length of a video in seconds that the user picked, one of the model's; else its default. */
+  seconds: z.number().int().positive().optional(),
 });
 
 export type MediaRequest = z.infer<typeof mediaRequestSchema>;

@@ -14,6 +14,8 @@ import {
   balanceHeader,
   createTestApp,
   issuerBlindSign,
+  TEST_HOLDER_KEY,
+  TEST_HOLDER_MONTH,
   TEST_VOUCHER_KEY,
   type TestApp,
 } from './helpers.js';
@@ -44,7 +46,7 @@ describe('the voucher key', () => {
   it('passes vouchers that the issuer signed blinded (RFC 9474)', async () => {
     const vouchers = await blindVouchers(KEY, 3);
     for (const voucher of vouchers) {
-      const blindSignature = issuerBlindSign(voucher.blinded);
+      const blindSignature = issuerBlindSign(KEY, voucher.blinded);
       const { nonce, signature } = await finalizeVoucher(KEY, voucher, blindSignature);
       expect(KEY.verify(nonce, signature)).toBe(true);
     }
@@ -82,6 +84,13 @@ describe('GET /api/credit/key', () => {
       packs: [...CREDIT.packs],
       maxVouchers: MAX_TOP_UP_VOUCHERS,
       payment: { network: 'Robinhood Chain', token: 'USDG', tokens: ['USDG', 'THKR'] },
+      holderKeys: [
+        {
+          keyId: TEST_HOLDER_KEY.keyId,
+          month: TEST_HOLDER_MONTH,
+          voucherUsd: CREDIT.holderVoucherUsd,
+        },
+      ],
     });
     expect(fromBase64Url(body.publicKey)).toEqual(KEY.publicKey);
   });

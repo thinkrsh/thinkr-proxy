@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { trialModelIds } from '../src/catalog.js';
 import { MESSAGES } from '../src/config/messages.js';
 import { TINFOIL } from '../src/config/tinfoil.js';
 import { TRIAL } from '../src/config/trial.js';
@@ -82,7 +83,7 @@ describe('GET /api/models in each mode', () => {
     const response = await trialApp(openAnswer).app.request('/api/models');
     const { models } = (await response.json()) as ModelsResponse;
     const open = models.filter((model) => model.available).map((model) => model.id);
-    expect(open.sort()).toEqual([...TRIAL.modelIds].sort());
+    expect(open.sort()).toEqual(trialModelIds().sort());
     for (const model of models.filter((item) => !item.available)) {
       expect(model.lockReason).toBe('credit');
     }

@@ -42,7 +42,8 @@ describe('createAccess, trial', () => {
     const { access } = trial();
     for (const model of MODEL_CATALOG) {
       const { info } = model;
-      const open = info.available && info.kind !== 'video' && !isDearest(model);
+      const video = info.kind === 'video' || info.kind === 'sourcedVideo';
+      const open = info.available && !video && !isDearest(model);
       expect(access.opens(info.id), info.id).toBe(open);
     }
     expect(access.opens('open/not-in-the-catalog')).toBe(false);

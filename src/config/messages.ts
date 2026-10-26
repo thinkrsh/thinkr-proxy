@@ -89,5 +89,26 @@ export const MESSAGES = {
   videoGone: 'This video is not available anymore.',
   ticketMissing: 'The request must carry the ticket of a video job.',
   ticketInvalid: 'This ticket of a video job is not valid.',
+  notSourcedModel: 'This model does not edit videos or make photos talk.',
+  sourcedCreditOnly:
+    'Video edits, upscales, and talking photos open with credit. Top up to make one.',
+  sourcedNoLink:
+    'Video edits, upscales, and talking photos need the public address of the proxy, which this one does not have.',
+  sourceType: 'Send an MP4 or a MOV video, or a WAV voice.',
+  sourceUnreadable: 'This file could not be read. Send an MP4 or a MOV video, or a WAV voice.',
+  sourceTooLarge: 'The file is too large. Send one of up to 50 MB.',
+  sourcesFull: 'The proxy holds too many files right now. Try again in a few minutes.',
+  sourceGone: 'This file is not held anymore. Pick it again and send it.',
+  sourceVideoNeeded: 'Pick the video to change first.',
+  sourceVoiceNeeded: 'Add a photo and a voice first.',
+  sourceWrongKind: 'This model takes a video, or a photo with a voice. Pick the right file.',
+  sourceTooShort: (seconds: number): string =>
+    `This model takes a file of at least ${String(seconds)} seconds.`,
+  sourceTooLong: (seconds: number): string =>
+    `This model takes a file of up to ${String(seconds)} seconds. Trim it and try again.`,
+  sourceTooBig: 'This video is too large for this model. Send one of up to 2560x1440.',
+  factorUnavailable: 'This model does not upscale by that factor. Pick another one.',
+  creativeUnavailable: 'This model has no creative mode.',
+  sourcedPromptEmpty: 'Describe the change to make.',
   internal: 'The proxy failed. Try again.',
 } as const;

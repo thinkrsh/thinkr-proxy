@@ -348,7 +348,10 @@ describe('POST /api/audio, music', () => {
   });
 
   it('counts one chat of the open lane on the free trial, and gives it back with no audio', async () => {
-    const answers = [musicStream({ audio: toBase64(mp3Of(1)) }), musicStream({ cost: 0 })];
+    const answers = [
+      musicStream({ audio: toBase64(mp3Of(1)) }),
+      ...Array.from({ length: AUDIO.musicAttempts }, () => musicStream({ cost: 0 })),
+    ];
     const fetchMock = vi.fn<typeof fetch>(() => Promise.resolve(answers.shift() ?? json({}, 500)));
     const testApp = createTestApp(fetchMock, { accessMode: 'trial' });
     await post(testApp, { modelId: MUSIC, prompt: 'Rain' });
@@ -356,7 +359,39 @@ describe('POST /api/audio, music', () => {
     const empty = await post(testApp, { modelId: MUSIC, prompt: 'Rain' });
     expect(empty.status).toBe(MEDIA.upstreamFailureStatus);
     expect(await errorOf(empty)).toEqual({ code: 'upstream_error', message: MESSAGES.noAudio });
+    expect(fetchMock).toHaveBeenCalledTimes(1 + AUDIO.musicAttempts);
     expect(await openChatsLeft(testApp)).toBe(TRIAL.chatsPerDay.open - 1);
+  });
+
+  it('asks Lyria again when a stream ends with no audio, and charges the song alone', async () => {
+    const answers = [
+      musicStream({ cost: 0 }),
+      musicStream({ audio: toBase64(mp3Of(1)), cost: 0.04 }),
+    ];
+    const fetchMock = vi.fn<typeof fetch>(() => Promise.resolve(answers.shift() ?? json({}, 500)));
+    const testApp = createTestApp(fetchMock, { accessMode: 'trial' });
+    const secret = await fundedBalance(testApp.ledger, 1);
+    const response = await post(testApp, { modelId: MUSIC, prompt: 'Rain' }, balanceHeader(secret));
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(await balanceOf(testApp, secret)).toBe(usdToMicros(1) - paid(0.04));
+  });
+
+  it('asks again when the stream breaks before its end', async () => {
+    const broken = new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"'));
+          controller.error(new TypeError('terminated'));
+        },
+      }),
+      { status: 200 },
+    );
+    const answers = [broken, musicStream({ audio: toBase64(mp3Of(1)) })];
+    const fetchMock = vi.fn<typeof fetch>(() => Promise.resolve(answers.shift() ?? json({}, 500)));
+    const response = await post(createTestApp(fetchMock), { modelId: MUSIC, prompt: 'Rain' });
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -440,6 +475,10 @@ describe('the files of audio', () => {
     expect(lyricsOf('[[A0]]\n[[B1]]\n[:] Golden light.\n[:] Rolling past.\n[[C2]]\n[:] Run!')).toBe(
       'Golden light.\nRolling past.\n\nRun!',
     );
+    // Lyria 3 Clip puts the times of each line in front of it, sometimes without an end.
+    expect(
+      lyricsOf('[0.0:2.4] Woke up this morning\n[2.4:4.8] The sky is blue\n[4.8:] Sunlight'),
+    ).toBe('Woke up this morning\nThe sky is blue\nSunlight');
   });
 });
 

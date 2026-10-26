@@ -11,6 +11,7 @@ import type { SyncStore } from './sync/store.js';
 import type { VoucherKeys } from './credit/voucher-key.js';
 import { MESSAGES } from './config/messages.js';
 import { SERVER } from './config/server.js';
+import { SOURCED } from './config/sourcedTools.js';
 import { LIMITS } from './config/limits.js';
 import { ProxyError, errorBody } from './lib/errors.js';
 import type { Forward } from './lib/forward.js';
@@ -72,7 +73,14 @@ export function createApp(deps: AppDeps): Hono {
   });
   app.route(
     '/',
-    createMediaRoute({ ...deps, limiter, checkLimiter, gate, apiKey: deps.env.openRouterApiKey }),
+    createMediaRoute({
+      ...deps,
+      limiter,
+      checkLimiter,
+      gate,
+      apiKey: deps.env.openRouterApiKey,
+      publicOrigin: deps.env.publicOrigin,
+    }),
   );
   app.route('/', createCreditRoute({ ...deps, limiter }));
   app.route('/', createSyncRoute(deps));
@@ -94,9 +102,20 @@ function requestLog(deps: Pick<AppDeps, 'now' | 'log'>): MiddlewareHandler {
     const startMs = deps.now();
     await next();
     const durationMs = deps.now() - startMs;
-    const entry = { at: new Date(startMs), method: c.req.method, path: c.req.path, durationMs };
+    const entry = {
+      at: new Date(startMs),
+      method: c.req.method,
+      path: loggedPath(c.req.path),
+      durationMs,
+    };
     deps.log(formatRequestLog({ ...entry, status: c.res.status }));
   };
+}
+
+/** The path of a request as the log keeps it: never the name of a source, which opens its file. */
+function loggedPath(path: string): string {
+  const sources = `${SERVER.basePath}${SOURCED.sourcesPath}/`;
+  return path.startsWith(sources) ? `${sources}*` : path;
 }
 
 const noStore: MiddlewareHandler = async (c, next) => {

@@ -42,10 +42,17 @@
 //   voice or a sound with a ZDR endpoint sits at the level Open · No retention, one without at the
 //   level Open. Each answered one test request that day. The voices and the formats are in
 //   config/audioTools.ts.
-import type { AudioMode, AudioUnit, ModelInfo, ModelPricing } from '../contract.js';
+import type {
+  AudioMode,
+  AudioUnit,
+  ModelInfo,
+  ModelPricing,
+  SourcedMode,
+  SourcedUnit,
+} from '../contract.js';
 
 /** What the catalog knows of a model. The proxy adds the price and the tools that the user sees. */
-export type CatalogInfo = Omit<ModelInfo, 'pricing' | 'media' | 'audio'>;
+export type CatalogInfo = Omit<ModelInfo, 'pricing' | 'media' | 'audio' | 'sourced'>;
 
 /**
  * How OpenRouter takes an image request: a chat completion, which can force zero data retention,
@@ -126,7 +133,34 @@ export interface AudioSettings {
   readonly costUsd: number;
 }
 
-export type MediaSettings = ImageSettings | VideoSettings | AudioSettings;
+/**
+ * What the proxy asks of a model of a sourced video (decision 216, 26 Oct 2026), what it charges
+ * for, and what one video costs Thinkr, about. The sources and their limits are in
+ * config/sourcedTools.ts.
+ */
+export interface SourcedSettings {
+  readonly kind: 'sourcedVideo';
+  readonly mode: SourcedMode;
+  /**
+   * What the provider charges for each unit, in USD: each second of the video it makes, or each
+   * megapixel of each second of an upscale, precise (`usd`) or creative (`creativeUsd`).
+   */
+  readonly rate: {
+    readonly per: SourcedUnit;
+    readonly usd: number;
+    readonly creativeUsd: number | null;
+  };
+  /** The least that one video costs, in USD; 0 when the provider charges no least. */
+  readonly minUsd: number;
+  /**
+   * One video of 5 seconds at the defaults, about: what the catalog shows. A balance pays ahead
+   * the estimate of its own source, plus 25%, and once the job ends, the cost that OpenRouter
+   * reports, plus 25% (decision 52).
+   */
+  readonly costUsd: number;
+}
+
+export type MediaSettings = ImageSettings | VideoSettings | AudioSettings | SourcedSettings;
 
 export interface CatalogModel {
   readonly info: CatalogInfo;
@@ -5139,6 +5173,121 @@ export const MODEL_CATALOG: readonly CatalogModel[] = [
       lane: 'open',
       privacy: 'open',
       description: "HeyGen's general video model for short clips.",
+      contextTokens: 0,
+      reasoning: false,
+      vision: false,
+      available: true,
+      teeModelId: null,
+    },
+  },
+  // Sourced videos (decision 216, 26 Oct 2026): an edit, an upscale, and a talking photo, at the
+  // level Open as all video. Prices read on 26 Oct 2026 from `pricing_skus` of GET
+  // https://openrouter.ai/api/v1/videos/models; the estimate is for 5 seconds at the defaults.
+  {
+    // cents_per_second_output 3: $0.15 for 5 s.
+    openRouterSlug: 'black-forest-labs/flux-video-edit',
+    cost: null,
+    price: null,
+    media: {
+      kind: 'sourcedVideo',
+      mode: 'edit',
+      rate: { per: 'second', usd: 0.03, creativeUsd: null },
+      minUsd: 0,
+      costUsd: 0.15,
+    },
+    info: {
+      id: 'open/flux-video-edit',
+      name: 'FLUX Video Edit',
+      maker: 'Black Forest Labs',
+      makerSlug: 'black-forest-labs',
+      kind: 'sourcedVideo',
+      lane: 'open',
+      privacy: 'open',
+      description: 'Changes a video from a prompt: add, remove, or replace what is in it, at 720p.',
+      contextTokens: 0,
+      reasoning: false,
+      vision: false,
+      available: true,
+      teeModelId: null,
+    },
+  },
+  {
+    // cents_per_second_output 28, minimum_cents_per_generation 56: $1.40 for 5 s.
+    openRouterSlug: 'runway/aleph-2',
+    cost: null,
+    price: null,
+    media: {
+      kind: 'sourcedVideo',
+      mode: 'edit',
+      rate: { per: 'second', usd: 0.28, creativeUsd: null },
+      minUsd: 0.56,
+      costUsd: 1.4,
+    },
+    info: {
+      id: 'open/aleph-2',
+      name: 'Aleph 2',
+      maker: 'Runway',
+      makerSlug: 'runway',
+      kind: 'sourcedVideo',
+      lane: 'open',
+      privacy: 'open',
+      description: "Runway's editing model: changes a video from a prompt and keeps the rest.",
+      contextTokens: 0,
+      reasoning: false,
+      vision: false,
+      available: true,
+      teeModelId: null,
+    },
+  },
+  {
+    // cents_per_megapixel_second_precise 3.5, _creative 5: 720p at 2x, 3.69 MP, $0.65 for 5 s.
+    openRouterSlug: 'black-forest-labs/flux-video-upscale',
+    cost: null,
+    price: null,
+    media: {
+      kind: 'sourcedVideo',
+      mode: 'upscale',
+      rate: { per: 'megapixelSecond', usd: 0.035, creativeUsd: 0.05 },
+      minUsd: 0,
+      costUsd: 0.65,
+    },
+    info: {
+      id: 'open/flux-video-upscale',
+      name: 'FLUX Video Upscale',
+      maker: 'Black Forest Labs',
+      makerSlug: 'black-forest-labs',
+      kind: 'sourcedVideo',
+      lane: 'open',
+      privacy: 'open',
+      description: 'Enlarges a video by 1.5 to 3 times and keeps its length and sound.',
+      contextTokens: 0,
+      reasoning: false,
+      vision: false,
+      available: true,
+      teeModelId: null,
+    },
+  },
+  {
+    // duration_seconds 0.05, by the length of the voice: $0.25 for 5 s.
+    openRouterSlug: 'heygen/avatar-iv',
+    cost: null,
+    price: null,
+    media: {
+      kind: 'sourcedVideo',
+      mode: 'talk',
+      rate: { per: 'second', usd: 0.05, creativeUsd: null },
+      minUsd: 0,
+      costUsd: 0.25,
+    },
+    info: {
+      id: 'open/avatar-iv',
+      name: 'Avatar IV',
+      maker: 'HeyGen',
+      makerSlug: 'heygen',
+      kind: 'sourcedVideo',
+      lane: 'open',
+      privacy: 'open',
+      description: "HeyGen's model that makes one photo talk, lips in time with the voice.",
       contextTokens: 0,
       reasoning: false,
       vision: false,

@@ -41,6 +41,17 @@ export const AUDIO = {
    */
   musicModalities: ['audio', 'text'],
   /**
+   * How many times to ask Lyria for one song. Lyria 3 Clip often ends its stream with the text
+   * "<instrumental>" and no audio, at a cost of 0 (two of three requests on 26 Oct 2026), and a
+   * stream can break before the audio; the next request usually brings the song.
+   */
+  musicAttempts: 3,
+  /**
+   * No new request of a song after this long, so that the answer reaches the app before Cloudflare
+   * gives up on the request (about 100 seconds): a song of Lyria 3 Pro takes about 35 seconds.
+   */
+  musicRetryWithinMs: 45_000,
+  /**
    * The audio tokens of one second of speech from Gemini TTS, which charges them as output: 75
    * tokens for 3.0 seconds on 26 Oct 2026 (GET /api/v1/generation of the test request).
    */

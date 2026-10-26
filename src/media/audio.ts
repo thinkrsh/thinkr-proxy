@@ -223,7 +223,28 @@ async function makeMusic(
   text: string,
   clientSignal: AbortSignal,
 ): Promise<AudioResult> {
-  const stream = await callOpenRouter(
+  const started = Date.now();
+  // What the requests without a song cost, as their streams report it (Lyria: nothing).
+  let emptyCostUsd = 0;
+  for (let attempt = 1; ; attempt += 1) {
+    const stream = await streamMusic(deps, target, text, clientSignal);
+    if (stream.parts.length > 0) {
+      return songOf(stream, emptyCostUsd + (stream.costUsd ?? target.settings.rate.usd));
+    }
+    emptyCostUsd += stream.costUsd ?? 0;
+    const late = Date.now() - started >= AUDIO.musicRetryWithinMs;
+    if (attempt >= AUDIO.musicAttempts || late) throw mediaUpstreamError(MESSAGES.noAudio);
+  }
+}
+
+/** One request of a song; a stream that breaks before its end counts as one without audio. */
+function streamMusic(
+  deps: UpstreamDeps,
+  target: AudioTarget,
+  text: string,
+  clientSignal: AbortSignal,
+): Promise<MusicStream> {
+  return callOpenRouter(
     deps,
     {
       path: OPENROUTER.chatCompletionsPath,
@@ -231,11 +252,26 @@ async function makeMusic(
       body: musicBody(target, text),
       timeoutMs: OPENROUTER.audioTimeoutMs,
       // The answer is read whole: one line of the stream holds the whole song, megabytes long.
-      read: async (response) => musicStreamOf(await response.text()),
+      read: async (response) => {
+        let body: string;
+        try {
+          body = await response.text();
+        } catch (error) {
+          // A body cut off by the network fails as a TypeError; a timeout or the app gone does not.
+          if (error instanceof TypeError) return BROKEN_STREAM;
+          throw error;
+        }
+        return musicStreamOf(body);
+      },
     },
     clientSignal,
   );
-  if (stream.parts.length === 0) throw mediaUpstreamError(MESSAGES.noAudio);
+}
+
+const BROKEN_STREAM: MusicStream = { parts: [], text: '', costUsd: null };
+
+/** The song of a stream that carried audio, at the cost of all the requests it took. */
+function songOf(stream: MusicStream, costUsd: number): AudioResult {
   const bytes = stream.parts.length === 1 ? null : concatBytes(stream.parts.map(fromBase64));
   const head = bytes ?? fromBase64(headOf(stream.parts[0] ?? ''));
   const type = audioTypeOf(head);
@@ -243,7 +279,7 @@ async function makeMusic(
   return {
     dataUrl: `data:${type};base64,${bytes === null ? (stream.parts[0] ?? '') : toBase64(bytes)}`,
     text: lyricsOf(stream.text),
-    costUsd: stream.costUsd ?? target.settings.rate.usd,
+    costUsd,
   };
 }
 
@@ -281,8 +317,11 @@ export function musicStreamOf(body: string): MusicStream {
 /** The line of Lyria that opens a section of a song, such as '[[A0]]'. */
 const SECTION_MARK = /^\[\[[^\]]*\]\]$/;
 
-/** The mark of Lyria in front of each sung line. */
-const SUNG_MARK = /^\[:\]\s*/;
+/**
+ * The mark of Lyria in front of each sung line: '[:]' from Lyria 3 Pro, or the times of the line,
+ * such as '[0.0:2.4]' or '[2.4:]', from Lyria 3 Clip (26 Oct 2026).
+ */
+const SUNG_MARK = /^\[[\d.]*:[\d.]*\]\s*/;
 
 /** The whole text of Lyria for a song with no words. */
 const INSTRUMENTAL = '<instrumental>';

@@ -27,6 +27,15 @@ const envSchema = z.object({
   TICKET_KEY_FILE: z.string().trim().min(1),
   /** The SQLite file of the ledger: vouchers spent, balances, and video jobs settled. */
   DATABASE_FILE: z.string().trim().min(1),
+  /**
+   * The public HTTPS address of the proxy, such as https://chat.thinkr.sh, where a provider fetches
+   * the source of a sourced video (decision 216). Unset, as on the laptop, no sourced video starts.
+   */
+  PUBLIC_ORIGIN: z
+    .string()
+    .trim()
+    .regex(/^https:\/\/[a-z0-9.-]+(:\d+)?$/i)
+    .optional(),
 });
 
 export interface Env {
@@ -39,6 +48,8 @@ export interface Env {
   readonly holderPublicKeysFile: string;
   readonly ticketKeyFile: string;
   readonly databaseFile: string;
+  /** The public HTTPS address of the proxy, without a slash at its end; null on the laptop. */
+  readonly publicOrigin: string | null;
 }
 
 export type EnvSource = Readonly<Record<string, string | undefined>>;
@@ -64,5 +75,6 @@ export function readEnv(source: EnvSource): Env {
     holderPublicKeysFile: result.data.HOLDER_PUBLIC_KEYS_FILE,
     ticketKeyFile: result.data.TICKET_KEY_FILE,
     databaseFile: result.data.DATABASE_FILE,
+    publicOrigin: result.data.PUBLIC_ORIGIN ?? null,
   };
 }

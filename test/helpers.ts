@@ -125,7 +125,12 @@ export interface TestAppOptions {
   readonly now?: () => number;
   /** The backups; unset, a new store in memory. */
   readonly syncStore?: SyncStore;
+  /** The public address where providers fetch sources; unset, the one of the tests. */
+  readonly publicOrigin?: string | null;
 }
+
+/** The public address of the proxy in the tests, where providers fetch sources. */
+export const TEST_PUBLIC_ORIGIN = 'https://chat.example.test';
 
 /**
  * The forward of the private lane over the fetch mock, so that one mock sees every upstream call.
@@ -165,6 +170,7 @@ export function createTestApp(
       holderPublicKeysFile: 'unused-in-tests.json',
       ticketKeyFile: 'unused-in-tests.txt',
       databaseFile: ':memory:',
+      publicOrigin: options.publicOrigin === undefined ? TEST_PUBLIC_ORIGIN : options.publicOrigin,
     },
     ledger,
     voucherKeys: TEST_VOUCHER_KEYS,

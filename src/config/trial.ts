@@ -7,14 +7,14 @@ export const TRIAL = {
   /**
    * The models open in the trial, by catalog id: every model that the proxy serves, since 22 Oct
    * 2026 ("gpp buka aja semua"), but video, which takes credit only (the owner, 23 Oct 2026): one
-   * video costs more than a day of chats. An image, or a piece of audio (26 Oct 2026), counts as
-   * one chat of its lane. The counts and
-   * budgets below still hold. To lock models for credit again, list the open ids here; every other
+   * video costs more than a day of chats, and so does a sourced video (decision 216). An image, or a
+   * piece of audio (26 Oct 2026), counts as one chat of its lane. The counts and budgets below still
+   * hold. To lock models for credit again, list the open ids here; every other
    * model then shows "credit". The dearest models below take credit too (catalog.ts).
    */
-  modelIds: MODEL_CATALOG.filter(({ info }) => info.available && info.kind !== 'video').map(
-    ({ info }) => info.id,
-  ),
+  modelIds: MODEL_CATALOG.filter(
+    ({ info }) => info.available && info.kind !== 'video' && info.kind !== 'sourcedVideo',
+  ).map(({ info }) => info.id),
   /**
    * The dearest models take credit only, so that a few chats cannot spend the budget of a lane for
    * every visitor (the plan that the owner approved with the catalog of 25 Oct 2026): a chat model
@@ -29,10 +29,12 @@ export const TRIAL = {
   /**
    * What the trial of a lane may cost in a day, in USD. Past it, the lane pauses until 00:00 UTC.
    * The private lane went from $2 to $5 with Voice on the trial (the owner, 26 Oct 2026: "budget
-   * harian naikin jadi $5 sekarang mulai banyak pengunjung app kita takut kehabisan"). The hard
-   * limits sit at the providers: an OpenRouter key with $50 of credit, and $15 on Tinfoil.
+   * harian naikin jadi $5 sekarang mulai banyak pengunjung app kita takut kehabisan"), and the open
+   * lane from $5 to $25 (the owner, 26 Oct 2026: "Open Router kasih $25 aja"). The hard limits
+   * sit at the providers: an OpenRouter key limited to $250 (GET /api/v1/key, read 26 Oct 2026),
+   * and $15 on Tinfoil.
    */
-  dailyBudgetUsd: { private: 5, open: 5 },
+  dailyBudgetUsd: { private: 5, open: 25 },
   /**
    * Requests of Voice that one visitor may send in a day on the trial (26 Oct 2026): recordings
    * and parts of answers to speak. Each turn of Voice mode is one recording, one chat of the private

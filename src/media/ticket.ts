@@ -17,6 +17,11 @@ export interface JobClaims {
   /** The catalog id of the model. */
   readonly modelId: string;
   readonly prepayment: Prepayment;
+  /**
+   * The names of the sources that the proxy holds for a sourced video (decision 216), which it
+   * drops once the job ends; empty for every other video.
+   */
+  readonly held: readonly string[];
 }
 
 export interface TicketSealer {
@@ -31,6 +36,8 @@ const sealedSchema = z.strictObject({
   model: z.string().min(1),
   balance: z.string().min(1).nullable(),
   paid: z.number().int().nonnegative(),
+  /** Absent from the tickets sealed before 26 Oct 2026 and from those with no source. */
+  held: z.array(z.string().min(1)).optional(),
 });
 
 const ALGORITHM = 'AES-GCM';
@@ -43,13 +50,14 @@ export function createTicketSealer(secret: Uint8Array): TicketSealer {
   ]);
 
   return {
-    async seal({ jobId, modelId, prepayment }) {
+    async seal({ jobId, modelId, prepayment, held }) {
       const body: z.infer<typeof sealedSchema> = {
         v: MEDIA.ticket.version,
         job: jobId,
         model: modelId,
         balance: prepayment.balanceHash,
         paid: prepayment.micros,
+        ...(held.length === 0 ? {} : { held: [...held] }),
       };
       const iv = randomBytes(MEDIA.ticket.ivBytes);
       const plain = new TextEncoder().encode(JSON.stringify(body));
@@ -63,6 +71,7 @@ export function createTicketSealer(secret: Uint8Array): TicketSealer {
         jobId: body.data.job,
         modelId: body.data.model,
         prepayment: { balanceHash: body.data.balance, micros: body.data.paid },
+        held: body.data.held ?? [],
       };
     },
   };

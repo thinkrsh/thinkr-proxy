@@ -4,6 +4,7 @@ import { z } from 'zod';
 
 import { CREDIT, VOUCHER_SIGNATURE } from './config/credit.js';
 import { PHOTO_LIMIT } from './config/imageTools.js';
+import { SOURCE_NAME_CHARS } from './config/sourcedTools.js';
 import { LIMITS } from './config/limits.js';
 import { MESSAGES } from './config/messages.js';
 
@@ -50,8 +51,49 @@ export interface ModelPricing {
  * OpenRouter routes no video job under zero data retention (openrouter.ai/docs/guides/overview/
  * multimodal/video-generation.md, read 23 Oct 2026).
  */
-export const MODEL_KINDS = ['text', 'image', 'video', 'audio'] as const;
+export const MODEL_KINDS = ['text', 'image', 'video', 'audio', 'sourcedVideo'] as const;
 export type ModelKind = (typeof MODEL_KINDS)[number];
+
+/**
+ * What the Video page makes from what the user brings (decision 216, 26 Oct 2026): a video edited
+ * from a prompt, a video upscaled, or a photo that talks with a voice. These models have the kind
+ * 'sourcedVideo', which the chat never lists; they run at the level Open, as video does.
+ */
+export const SOURCED_MODES = ['edit', 'upscale', 'talk'] as const;
+export type SourcedMode = (typeof SOURCED_MODES)[number];
+
+/**
+ * What a sourced video charges for: each second of the video it makes, or each megapixel of each
+ * second (an upscale).
+ */
+export const SOURCED_UNITS = ['second', 'megapixelSecond'] as const;
+export type SourcedUnit = (typeof SOURCED_UNITS)[number];
+
+/** What the Video page may ask of a model of a sourced video, and what it costs the user. */
+export interface SourcedInfo {
+  mode: SourcedMode;
+  /**
+   * What the user pays, about: the cost at the provider plus 25% (decision 52), per unit; an
+   * upscale prices its creative mode apart.
+   */
+  price: { per: SourcedUnit; usd: number; creativeUsd: number | null };
+  /** The least that one video costs the user, about; 0 when the provider charges no least. */
+  minUsd: number;
+  /** The shortest and the longest source, in seconds: the video, or the voice of a photo. */
+  minSeconds: number;
+  maxSeconds: number;
+  /** The largest source video, in pixels of one frame; null for no limit of the provider. */
+  maxSourcePixels: number | null;
+  /** The largest frame that comes out, in pixels, where an upscale stops; null for no limit. */
+  maxOutputPixels: number | null;
+  /** The factors of an upscale, the default first; empty for every other mode. */
+  factors: number[];
+  /** The shapes and resolutions of a talking photo, the default first; empty otherwise. */
+  aspectRatios: string[];
+  resolutions: string[];
+  /** True when the request must carry a prompt: an edit. */
+  promptRequired: boolean;
+}
 
 /**
  * What the Audio page makes (the owner, 26 Oct 2026): music, a voice that reads a text, or a sound
@@ -186,6 +228,8 @@ export interface ModelInfo {
   media: MediaInfo | null;
   /** What the Audio page may ask of a model of audio; null for every other kind. */
   audio: AudioInfo | null;
+  /** What the Video page may ask of a model of a sourced video; null for every other kind. */
+  sourced: SourcedInfo | null;
 }
 
 /** Why the app shows a model locked: not served yet, or outside the free trial until the top-up. */
@@ -448,3 +492,53 @@ export interface VideoStatusResponse {
   status: VideoStatus;
   message: string | null;
 }
+
+/**
+ * The answer of POST /api/videos/sources (decision 216): the source that the proxy holds for a
+ * short while, and what it read from it. The app names the source in POST /api/videos/sourced.
+ */
+export interface SourceResponse {
+  /** A random name that only the proxy and the provider ever see in a link. */
+  source: string;
+  /** The length of the video or the voice, in seconds. */
+  seconds: number;
+  /** The size of a frame of a video; null for a voice. */
+  width: number | null;
+  height: number | null;
+}
+
+/** The name of a source that the proxy holds: `SOURCED.tokenBytes` random bytes in base64url. */
+const sourceNameSchema = z
+  .string()
+  .regex(new RegExp(`^[A-Za-z0-9_-]{${String(SOURCE_NAME_CHARS)}}$`), MESSAGES.sourceGone);
+
+/**
+ * POST /api/videos/sourced (decision 216): a video made from what the user brings. An edit and an
+ * upscale name a source video; a talking photo names a photo and a source voice. A prompt may be
+ * empty, but for an edit.
+ */
+export const sourcedRequestSchema = z.strictObject({
+  modelId: z.string().min(1, MESSAGES.modelIdRequired),
+  prompt: z.string().max(LIMITS.maxPromptChars, MESSAGES.promptTooLong),
+  /** The video to edit or to upscale, held by the proxy. */
+  video: sourceNameSchema.optional(),
+  /** The voice that a photo speaks with, held by the proxy as WAV. */
+  voice: sourceNameSchema.optional(),
+  /** The photo that talks. */
+  image: imageDataUrlSchema.optional(),
+  /** The factor of an upscale, one of the model's; else its default. */
+  factor: z.number().positive().optional(),
+  /** The creative mode of an upscale, which invents fine detail; else the precise one. */
+  creative: z.literal(true).optional(),
+  /** The shape and the resolution of a talking photo, one of the model's; else its default. */
+  aspectRatio: z
+    .string()
+    .regex(/^\d{1,2}:\d{1,2}$/, MESSAGES.shapeUnavailable)
+    .optional(),
+  resolution: z
+    .string()
+    .regex(/^\d+(\.\d+)?[Kp]?$/, MESSAGES.sizeUnavailable)
+    .optional(),
+});
+
+export type SourcedRequest = z.infer<typeof sourcedRequestSchema>;

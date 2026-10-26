@@ -5,11 +5,20 @@
 // what the balance paid once it ends; GET /api/videos/content passes its video on. The ticket goes
 // in the job header, so the log never holds it. POST /api/audio (26 Oct 2026) makes one piece of
 // music, a voice that reads a text, or a sound, and answers with it whole, paid as an image is.
+// A sourced video (decision 216, 26 Oct 2026) starts in two steps: POST /api/videos/sources holds
+// its source, a video or a voice, for a few minutes; POST /api/videos/sourced starts its job, which
+// a provider fetches the source for at GET /api/videos/sources/<name>, and follows as a video does.
 import { Hono, type Context } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 
 import type { Gate } from '../access/gate.js';
-import { findAudioTools, findImageTools, findModel, findVideoTools } from '../catalog.js';
+import {
+  findAudioTools,
+  findImageTools,
+  findModel,
+  findSourcedTools,
+  findVideoTools,
+} from '../catalog.js';
 import { AUDIO } from '../config/audioTools.js';
 import { MEDIA } from '../config/media.js';
 import { MESSAGES } from '../config/messages.js';
@@ -17,14 +26,18 @@ import type {
   AudioSettings,
   CatalogModel,
   ImageSettings,
+  SourcedSettings,
   VideoSettings,
 } from '../config/models.js';
 import { SERVER } from '../config/server.js';
+import { SOURCED } from '../config/sourcedTools.js';
 import {
   mediaRequestSchema,
+  sourcedRequestSchema,
   type AudioResponse,
   type ImageResponse,
   type MediaRequest,
+  type SourceResponse,
   type VideoJobResponse,
   type VideoStatusResponse,
 } from '../contract.js';
@@ -36,9 +49,17 @@ import type { RateLimiter } from '../lib/rate-limit.js';
 import { chosenAudio, generateAudio, type AudioResult } from '../media/audio.js';
 import { chosenImage, chosenVideo } from '../media/choice.js';
 import { generateImage, type ImageResult } from '../media/image.js';
+import { measureVideo, measureWav } from '../media/measure.js';
+import { chosenSourced, sourcedUpstreamBody } from '../media/sourced.js';
+import {
+  createSourceStore,
+  laterByTimer,
+  type HeldSource,
+  type SourceStore,
+} from '../media/sources.js';
 import { createTicketSealer, type JobClaims, type TicketSealer } from '../media/ticket.js';
 import type { MediaPrompt } from '../media/upstream.js';
-import { checkVideo, fetchVideo, submitVideo } from '../media/video.js';
+import { checkVideo, fetchVideo, submitVideo, submitVideoJob } from '../media/video.js';
 import type { UpstreamDeps } from '../openrouter/stream.js';
 
 export interface MediaRouteDeps extends UpstreamDeps {
@@ -53,6 +74,11 @@ export interface MediaRouteDeps extends UpstreamDeps {
   readonly gate: Gate;
   /** The secret that seals the tickets of video jobs, `MEDIA.ticket.keyBytes` long. */
   readonly ticketKey: Uint8Array;
+  /**
+   * The public HTTPS address of the proxy, where a provider fetches the source of a sourced video;
+   * null on the laptop, where no sourced video starts.
+   */
+  readonly publicOrigin: string | null;
 }
 
 interface MediaModel<S> {
@@ -63,9 +89,14 @@ interface MediaModel<S> {
 
 export function createMediaRoute(deps: MediaRouteDeps): Hono {
   const tickets = createTicketSealer(deps.ticketKey);
+  const sources = createSourceStore({ now: deps.now, later: laterByTimer });
   const tooLarge = bodyLimit({
     maxSize: SERVER.maxMediaBodyBytes,
     onError: (c) => c.json(errorBody('invalid_request', MESSAGES.tooLarge), 413),
+  });
+  const sourceTooLarge = bodyLimit({
+    maxSize: SOURCED.maxSourceBytes,
+    onError: (c) => c.json(errorBody('invalid_request', MESSAGES.sourceTooLarge), 413),
   });
 
   return new Hono()
@@ -75,9 +106,16 @@ export function createMediaRoute(deps: MediaRouteDeps): Hono {
       c.json<VideoJobResponse>(await startVideo(deps, tickets, c), 202),
     )
     .get(MEDIA.videoStatusPath, async (c) =>
-      c.json<VideoStatusResponse>(await followVideo(deps, tickets, c)),
+      c.json<VideoStatusResponse>(await followVideo(deps, tickets, sources, c)),
     )
-    .get(MEDIA.videoContentPath, (c) => passVideo(deps, tickets, c));
+    .get(MEDIA.videoContentPath, (c) => passVideo(deps, tickets, c))
+    .post(SOURCED.sourcesPath, sourceTooLarge, async (c) =>
+      c.json<SourceResponse>(await holdSource(deps, sources, c), 201),
+    )
+    .get(`${SOURCED.sourcesPath}/:name`, (c) => passSource(sources, c))
+    .post(SOURCED.sourcedPath, tooLarge, async (c) =>
+      c.json<VideoJobResponse>(await startSourced(deps, tickets, sources, c), 202),
+    );
 }
 
 async function makeImage(deps: MediaRouteDeps, c: Context): Promise<ImageResponse> {
@@ -184,12 +222,102 @@ async function startVideo(
   );
   const jobId = await submitVideo(deps, { slug, settings }, promptOf(request), c.req.raw.signal);
   const prepayment = admitted.pay();
-  return { ticket: await tickets.seal({ jobId, modelId: model.info.id, prepayment }) };
+  return { ticket: await tickets.seal({ jobId, modelId: model.info.id, prepayment, held: [] }) };
+}
+
+/**
+ * Holds the source of a sourced video, its raw bytes, once the proxy has read its length and its
+ * frame. Only a balance holds one, or the laptop: a sourced video takes credit (decision 216).
+ */
+async function holdSource(
+  deps: MediaRouteDeps,
+  sources: SourceStore,
+  c: Context,
+): Promise<SourceResponse> {
+  const visitor = take(deps.checkLimiter, deps, c);
+  const balance = await deps.gate.balanceOf(c);
+  // A price of nothing: this only refuses the free trial; the job pays when it starts.
+  deps.gate.admitPrepaid({ visitor, balance }, 0, MESSAGES.sourcedCreditOnly);
+  const type = (c.req.header('Content-Type') ?? '').split(';')[0]?.trim().toLowerCase() ?? '';
+  const videoTypes: readonly string[] = SOURCED.videoTypes;
+  const voice = type === SOURCED.voiceType;
+  if (!voice && !videoTypes.includes(type)) {
+    throw new ProxyError('invalid_request', MESSAGES.sourceType);
+  }
+  const bytes = new Uint8Array(await c.req.arrayBuffer());
+  const measured = voice ? measureWav(bytes) : measureVideo(bytes);
+  if (measured === null) throw new ProxyError('invalid_request', MESSAGES.sourceUnreadable);
+  const source = sources.hold({ ...measured, bytes, type });
+  return { source, ...measured };
+}
+
+/** A source to the provider that fetches it, while the proxy holds it. */
+function passSource(sources: SourceStore, c: Context): Response {
+  const source = sources.get(c.req.param('name') ?? '');
+  if (source === undefined) {
+    return c.json(errorBody('invalid_request', MESSAGES.sourceGone), MEDIA.goneStatus);
+  }
+  return new Response(source.bytes, {
+    status: 200,
+    headers: {
+      'Content-Type': source.type,
+      'Content-Length': String(source.bytes.byteLength),
+    },
+  });
+}
+
+/**
+ * Starts a sourced video job, which only a balance pays, ahead, at the estimate of its source, and
+ * answers with the ticket of the job; the ticket names the sources, which go once the job ends.
+ */
+async function startSourced(
+  deps: MediaRouteDeps,
+  tickets: TicketSealer,
+  sources: SourceStore,
+  c: Context,
+): Promise<VideoJobResponse> {
+  const visitor = take(deps.limiter, deps, c);
+  const request = parseBody(sourcedRequestSchema, await readJson(c));
+  const { model, slug, settings } = servableSourcedModel(request.modelId);
+  const origin = deps.publicOrigin;
+  if (origin === null) throw new ProxyError('model_unavailable', MESSAGES.sourcedNoLink);
+  const chosen = chosenSourced(settings, findSourcedTools(model.info.id), {
+    ...request,
+    video: heldSource(sources, request.video),
+    voice: heldSource(sources, request.voice),
+    image: request.image ?? null,
+  });
+  const balance = await deps.gate.balanceOf(c);
+  const admitted = deps.gate.admitPrepaid(
+    { visitor, balance },
+    usdToMicros(mediaPriceUsd(chosen)),
+    MESSAGES.sourcedCreditOnly,
+  );
+  const linkOf = (name: string | undefined): string | null =>
+    name === undefined ? null : `${origin}${SERVER.basePath}${SOURCED.sourcesPath}/${name}`;
+  const body = sourcedUpstreamBody(slug, settings, chosen, {
+    video: linkOf(request.video),
+    voice: linkOf(request.voice),
+    image: request.image ?? null,
+  });
+  const jobId = await submitVideoJob(deps, body, c.req.raw.signal);
+  const prepayment = admitted.pay();
+  const held = [request.video, request.voice].filter((name) => name !== undefined);
+  return { ticket: await tickets.seal({ jobId, modelId: model.info.id, prepayment, held }) };
+}
+
+/** The source of a name while the proxy holds it; null for a request that names none. */
+function heldSource(sources: SourceStore, name: string | undefined): HeldSource | null {
+  if (name === undefined) return null;
+  const source = sources.get(name);
+  if (source === undefined) throw new ProxyError('invalid_request', MESSAGES.sourceGone);
+  return source;
 }
 
 async function followVideo(
   deps: MediaRouteDeps,
   tickets: TicketSealer,
+  sources: SourceStore,
   c: Context,
 ): Promise<VideoStatusResponse> {
   take(deps.checkLimiter, deps, c);
@@ -200,6 +328,8 @@ async function followVideo(
   // A failed job gives back all it paid; a finished one pays its cost plus 25% (decision 52).
   const finalMicros = state.status === 'failed' ? 0 : videoPriceMicros(state.costUsd, paid.micros);
   await deps.gate.settleJob(claims.jobId, paid, finalMicros);
+  // The provider has what it needed: the sources of a sourced video go now.
+  for (const name of claims.held) sources.drop(name);
   return { status: state.status, message: state.reason };
 }
 
@@ -284,6 +414,14 @@ function servableVideoModel(modelId: string): MediaModel<VideoSettings> {
   const { model, slug } = servableMediaModel(modelId);
   if (model.media?.kind !== 'video') {
     throw new ProxyError('invalid_request', MESSAGES.notVideoModel);
+  }
+  return { model, slug, settings: model.media };
+}
+
+function servableSourcedModel(modelId: string): MediaModel<SourcedSettings> {
+  const { model, slug } = servableMediaModel(modelId);
+  if (model.media?.kind !== 'sourcedVideo') {
+    throw new ProxyError('invalid_request', MESSAGES.notSourcedModel);
   }
   return { model, slug, settings: model.media };
 }

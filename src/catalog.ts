@@ -10,9 +10,11 @@ import {
   type CatalogModel,
   type ImageSettings,
   type MediaSettings,
+  type SourcedSettings,
   type VideoSettings,
 } from './config/models.js';
 import { LIMITS } from './config/limits.js';
+import { SOURCED_TOOLS, type SourcedTools } from './config/sourcedTools.js';
 import { TRIAL } from './config/trial.js';
 import { VIDEO_TOOLS, type VideoTools } from './config/videoTools.js';
 import type {
@@ -24,6 +26,7 @@ import type {
   ModelKind,
   ModelsResponse,
   PrivacyLevel,
+  SourcedInfo,
   VideoToolsInfo,
 } from './contract.js';
 import { mediaPriceUsd, userPricing } from './credit/balance.js';
@@ -70,6 +73,10 @@ function listedModel(model: CatalogModel, access: Pick<Access, 'opens'>): Listed
     pricing: userPricing(model),
     media: mediaInfo(model.media, IMAGE_TOOLS[info.id], VIDEO_TOOLS[info.id]),
     audio: model.media?.kind === 'audio' ? audioInfo(model.media, findAudioTools(info.id)) : null,
+    sourced:
+      model.media?.kind === 'sourcedVideo'
+        ? sourcedInfo(model.media, findSourcedTools(info.id))
+        : null,
     available: lockReason === null,
     lockReason,
   };
@@ -85,7 +92,7 @@ function mediaInfo(
   tools: ImageTools | undefined,
   videoTools: VideoTools | undefined,
 ): MediaInfo | null {
-  if (media === undefined || media.kind === 'audio') return null;
+  if (media === undefined || media.kind === 'audio' || media.kind === 'sourcedVideo') return null;
   const priceUsd = mediaPriceUsd(media);
   const aspectRatios = [...media.aspectRatios];
   if (media.kind === 'image') {
@@ -127,6 +134,28 @@ function audioInfo(media: AudioSettings, tools: AudioTools): AudioInfo {
     voices: tools.voices.map((voice) => ({ ...voice })),
     maxChars: tools.maxChars,
     price: { per: media.rate.per, usd: mediaPriceUsd({ costUsd: media.rate.usd }) },
+  };
+}
+
+/** A model of a sourced video as the Video page shows it, each unit at what the user pays, about. */
+function sourcedInfo(media: SourcedSettings, tools: SourcedTools): SourcedInfo {
+  const { rate } = media;
+  return {
+    mode: media.mode,
+    price: {
+      per: rate.per,
+      usd: mediaPriceUsd({ costUsd: rate.usd }),
+      creativeUsd: rate.creativeUsd === null ? null : mediaPriceUsd({ costUsd: rate.creativeUsd }),
+    },
+    minUsd: mediaPriceUsd({ costUsd: media.minUsd }),
+    minSeconds: tools.minSeconds,
+    maxSeconds: tools.maxSeconds,
+    maxSourcePixels: tools.maxSourcePixels,
+    maxOutputPixels: tools.maxOutputPixels,
+    factors: [...tools.factors],
+    aspectRatios: [...tools.aspectRatios],
+    resolutions: [...tools.resolutions],
+    promptRequired: tools.promptRequired,
   };
 }
 
@@ -175,6 +204,13 @@ export function findVideoTools(id: string): VideoTools {
 export function findAudioTools(id: string): AudioTools {
   const tools = AUDIO_TOOLS[id];
   if (tools === undefined) throw new Error(`The audio model ${id} has no audio tools.`);
+  return tools;
+}
+
+/** The tools of a sourced video model of the catalog, which assertCatalogIsValid makes sure it has. */
+export function findSourcedTools(id: string): SourcedTools {
+  const tools = SOURCED_TOOLS[id];
+  if (tools === undefined) throw new Error(`The sourced video model ${id} has no tools.`);
   return tools;
 }
 
@@ -279,15 +315,14 @@ function mediaProblems({ info, media }: CatalogModel): string[] {
   if (info.lane !== 'open') {
     problems.push(`${info.id}: images, video, and audio run on the open lane`);
   }
-  if (info.kind === 'video' && info.privacy !== 'open') {
+  if ((info.kind === 'video' || info.kind === 'sourcedVideo') && info.privacy !== 'open') {
     problems.push(`${info.id}: video has no zero data retention, so its level is Open`);
   }
   if (media?.kind === 'image' && media.api.name !== 'chat' && info.privacy !== 'open') {
     problems.push(`${info.id}: only a chat completion forces zero data retention on an image`);
   }
   if (
-    media !== undefined &&
-    media.kind !== 'audio' &&
+    (media?.kind === 'image' || media?.kind === 'video') &&
     !media.aspectRatios.includes(media.aspectRatio)
   ) {
     problems.push(`${info.id}: its shapes must hold its default shape`);
@@ -463,6 +498,57 @@ function videoToolProblems(
   return problems;
 }
 
+/**
+ * Every model of a sourced video has its tools and nothing else has any; an upscale, and only an
+ * upscale, has factors and charges by the megapixel; a talking photo, and only it, has shapes and
+ * resolutions; and only an edit needs a prompt (decision 216, 26 Oct 2026).
+ */
+export function sourcedToolsProblems(
+  catalog: readonly CatalogModel[],
+  tools: Readonly<Record<string, SourcedTools>>,
+): string[] {
+  const problems: string[] = [];
+  const sourcedIds = new Set<string>();
+  for (const model of catalog) {
+    if (model.media?.kind !== 'sourcedVideo') continue;
+    sourcedIds.add(model.info.id);
+    problems.push(...sourcedToolProblems(model.info.id, model.media, tools[model.info.id]));
+  }
+  for (const id of Object.keys(tools)) {
+    if (!sourcedIds.has(id)) problems.push(`${id}: sourced tools for a model that makes none`);
+  }
+  return problems;
+}
+
+function sourcedToolProblems(
+  id: string,
+  media: SourcedSettings,
+  tools: SourcedTools | undefined,
+): string[] {
+  if (tools === undefined) return [`${id}: a sourced video model needs its tools`];
+  const problems: string[] = [];
+  const upscale = media.mode === 'upscale';
+  const talk = media.mode === 'talk';
+  if (tools.minSeconds <= 0 || tools.minSeconds > tools.maxSeconds) {
+    problems.push(`${id}: its sources must run from a shortest to a longest length`);
+  }
+  if (upscale !== tools.factors.length > 0 || upscale !== (media.rate.per === 'megapixelSecond')) {
+    problems.push(
+      `${id}: an upscale, and only an upscale, has factors and charges by the megapixel`,
+    );
+  }
+  if ((media.rate.creativeUsd !== null) !== upscale) {
+    problems.push(`${id}: only an upscale has a creative mode`);
+  }
+  if (talk !== tools.aspectRatios.length > 0 || talk !== tools.resolutions.length > 0) {
+    problems.push(`${id}: a talking photo, and only it, has shapes and resolutions`);
+  }
+  if (tools.promptRequired !== (media.mode === 'edit')) {
+    problems.push(`${id}: only an edit needs a prompt`);
+  }
+  return problems;
+}
+
 export function assertCatalogIsValid(): void {
   const problems = [
     ...catalogProblems(MODEL_CATALOG, DEFAULT_MODEL_ID),
@@ -470,6 +556,7 @@ export function assertCatalogIsValid(): void {
     ...imageToolsProblems(MODEL_CATALOG, IMAGE_TOOLS),
     ...videoToolsProblems(MODEL_CATALOG, VIDEO_TOOLS),
     ...audioToolsProblems(MODEL_CATALOG, AUDIO_TOOLS),
+    ...sourcedToolsProblems(MODEL_CATALOG, SOURCED_TOOLS),
   ];
   if (problems.length > 0) throw new Error(`Invalid model catalog: ${problems.join('; ')}.`);
 }

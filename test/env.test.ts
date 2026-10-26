@@ -23,7 +23,20 @@ describe('readEnv', () => {
       holderPublicKeysFile: '../../secret/holder-public-keys-dev.json',
       ticketKeyFile: '../../secret/ticket-key-dev.txt',
       databaseFile: '.data/ledger.db',
+      publicOrigin: null,
     });
+  });
+
+  it('reads the public address where providers fetch sources (decision 216)', () => {
+    expect(readEnv({ ...LAPTOP, PUBLIC_ORIGIN: 'https://chat.thinkr.sh' })).toMatchObject({
+      publicOrigin: 'https://chat.thinkr.sh',
+    });
+  });
+
+  it('fails on a public address that is not an HTTPS origin', () => {
+    for (const origin of ['http://chat.thinkr.sh', 'https://chat.thinkr.sh/', 'chat.thinkr.sh']) {
+      expect(() => readEnv({ ...LAPTOP, PUBLIC_ORIGIN: origin }), origin).toThrow(/PUBLIC_ORIGIN/);
+    }
   });
 
   it('reads the header of Cloudflare on the server', () => {

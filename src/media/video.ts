@@ -78,12 +78,21 @@ export function submitVideo(
   prompt: MediaPrompt,
   clientSignal: AbortSignal,
 ): Promise<string> {
+  return submitVideoJob(deps, videoUpstreamBody(target, prompt), clientSignal);
+}
+
+/** Starts a job from its JSON body, a video or a sourced video, and returns its id at OpenRouter. */
+export function submitVideoJob(
+  deps: UpstreamDeps,
+  body: object,
+  clientSignal: AbortSignal,
+): Promise<string> {
   return callOpenRouter(
     deps,
     {
       path: OPENROUTER.videosPath,
       method: 'POST',
-      body: videoUpstreamBody(target, prompt),
+      body,
       timeoutMs: OPENROUTER.videoRequestTimeoutMs,
       read: async (response) => {
         const job = submittedSchema.safeParse(await response.json());

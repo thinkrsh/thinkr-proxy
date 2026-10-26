@@ -142,10 +142,10 @@ export interface Gate {
   admitPremium: (payer: Payer, price: PremiumPrice, trial?: TrialTerms) => PremiumTicket;
   /**
    * Admits a video job at its price, about, which the balance pays once the provider takes the
-   * job (the owner, 23 Oct 2026). Only a balance pays; the free trial gets `model_unavailable`. The
-   * mode 'full' of the laptop admits it free.
+   * job (the owner, 23 Oct 2026). Only a balance pays; the free trial gets `model_unavailable`, with
+   * `creditOnlyMessage` when given. The mode 'full' of the laptop admits it free.
    */
-  admitPrepaid: (payer: Payer, priceMicros: number) => PrepaidTicket;
+  admitPrepaid: (payer: Payer, priceMicros: number, creditOnlyMessage?: string) => PrepaidTicket;
   /**
    * Settles a video job, once: the balance gets back what it paid ahead beyond `finalMicros`, or
    * pays the rest when the job cost more. A second settlement of the same job changes nothing.
@@ -227,11 +227,11 @@ export function createGate(deps: GateDeps): Gate {
         },
       };
     },
-    admitPrepaid(payer, priceMicros) {
+    admitPrepaid(payer, priceMicros, creditOnlyMessage = MESSAGES.videoCreditOnly) {
       const { balance } = payer;
       if (balance === null) {
         if (deps.access.mode === 'full') return FREE_PREPAID;
-        throw new ProxyError('model_unavailable', MESSAGES.videoCreditOnly);
+        throw new ProxyError('model_unavailable', creditOnlyMessage);
       }
       if (balance.micros < priceMicros) throw new ProxyError('balance_low', MESSAGES.balanceLow);
       return {

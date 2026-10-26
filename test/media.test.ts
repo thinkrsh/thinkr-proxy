@@ -124,9 +124,12 @@ describe('GET /api/models, the kinds', () => {
       resolution: '720p',
       audio: true,
       priceUsd: mediaPriceUsd(settingsOf(VIDEO)),
+      videoTools: expect.objectContaining({ silent: true, lastFrame: true }) as unknown,
     });
     const image = models.find((model) => model.id === ZDR_IMAGE)?.media;
-    expect(image?.aspectRatios).toEqual(['16:9', '1:1', '9:16']);
+    // The three shapes of the chat come first; the Image page offers the rest (25 Oct 2026).
+    expect(image?.aspectRatios.slice(0, 3)).toEqual(['16:9', '1:1', '9:16']);
+    expect(image?.aspectRatios).toContain('21:9');
     expect(image?.durations).toEqual([]);
     expect(models.find((model) => model.id === ZDR_IMAGE)?.media?.seconds).toBeNull();
     expect(models.some((model) => model.kind === 'text')).toBe(true);
@@ -203,7 +206,7 @@ describe('POST /api/images', () => {
     const response = await post(testApp, MEDIA.imagesPath, {
       modelId: ZDR_IMAGE,
       prompt: 'A fox',
-      aspectRatio: '21:9',
+      aspectRatio: '9:21',
     });
     expect(response.status).toBe(400);
     expect(await errorOf(response)).toEqual({

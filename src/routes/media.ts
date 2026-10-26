@@ -3,18 +3,26 @@
 // cost plus 25% (decision 52). POST /api/videos starts a video job, which only a balance pays,
 // ahead, and answers with the ticket of the job; GET /api/videos/status follows the job and settles
 // what the balance paid once it ends; GET /api/videos/content passes its video on. The ticket goes
-// in the job header, so the log never holds it.
+// in the job header, so the log never holds it. POST /api/audio (26 Oct 2026) makes one piece of
+// music, a voice that reads a text, or a sound, and answers with it whole, paid as an image is.
 import { Hono, type Context } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 
 import type { Gate } from '../access/gate.js';
-import { findModel } from '../catalog.js';
+import { findAudioTools, findImageTools, findModel, findVideoTools } from '../catalog.js';
+import { AUDIO } from '../config/audioTools.js';
 import { MEDIA } from '../config/media.js';
 import { MESSAGES } from '../config/messages.js';
-import type { CatalogModel, ImageSettings, VideoSettings } from '../config/models.js';
+import type {
+  AudioSettings,
+  CatalogModel,
+  ImageSettings,
+  VideoSettings,
+} from '../config/models.js';
 import { SERVER } from '../config/server.js';
 import {
   mediaRequestSchema,
+  type AudioResponse,
   type ImageResponse,
   type MediaRequest,
   type VideoJobResponse,
@@ -25,6 +33,7 @@ import { parseBody, readJson } from '../lib/body.js';
 import { answerSpend } from '../lib/cost.js';
 import { ProxyError, errorBody } from '../lib/errors.js';
 import type { RateLimiter } from '../lib/rate-limit.js';
+import { chosenAudio, generateAudio, type AudioResult } from '../media/audio.js';
 import { chosenImage, chosenVideo } from '../media/choice.js';
 import { generateImage, type ImageResult } from '../media/image.js';
 import { createTicketSealer, type JobClaims, type TicketSealer } from '../media/ticket.js';
@@ -61,6 +70,7 @@ export function createMediaRoute(deps: MediaRouteDeps): Hono {
 
   return new Hono()
     .post(MEDIA.imagesPath, tooLarge, async (c) => c.json<ImageResponse>(await makeImage(deps, c)))
+    .post(MEDIA.audioPath, tooLarge, async (c) => c.json<AudioResponse>(await makeAudio(deps, c)))
     .post(MEDIA.videosPath, tooLarge, async (c) =>
       c.json<VideoJobResponse>(await startVideo(deps, tickets, c), 202),
     )
@@ -73,17 +83,30 @@ export function createMediaRoute(deps: MediaRouteDeps): Hono {
 async function makeImage(deps: MediaRouteDeps, c: Context): Promise<ImageResponse> {
   const visitor = take(deps.limiter, deps, c);
   const request = parseBody(mediaRequestSchema, await readJson(c));
+  if (asksVideoTools(request)) throw new ProxyError('invalid_request', MESSAGES.videoToolsOnly);
+  if (request.voice !== undefined) throw new ProxyError('invalid_request', MESSAGES.voiceAudioOnly);
   const servable = servableImageModel(request.modelId);
   const { model, slug } = servable;
-  const settings = chosenImage(servable.settings, request);
+  const photos = photosOf(request);
+  const chosen = chosenImage(servable.settings, findImageTools(model.info.id), {
+    ...request,
+    photoCount: photos.length,
+  });
+  const { settings, options } = chosen;
   const balance = await deps.gate.balanceOf(c);
-  const ticket = deps.gate.admit({ visitor, balance }, model, request.prompt.length);
+  // A balance holds the price of the size and the photos picked, not that of the defaults.
+  const ticket = deps.gate.admit(
+    { visitor, balance },
+    { ...model, media: settings },
+    request.prompt.length,
+    { webSearch: false, creditOnly: chosen.creditOnly },
+  );
   let result: ImageResult;
   try {
     result = await generateImage(
       deps,
-      { slug, privacy: model.info.privacy, settings },
-      promptOf(request),
+      { slug, privacy: model.info.privacy, settings, options },
+      { text: request.prompt, photos },
       c.req.raw.signal,
     );
   } catch (error) {
@@ -101,6 +124,41 @@ async function makeImage(deps: MediaRouteDeps, c: Context): Promise<ImageRespons
   return { images: result.dataUrls.map((dataUrl) => ({ dataUrl })), text: result.text };
 }
 
+async function makeAudio(deps: MediaRouteDeps, c: Context): Promise<AudioResponse> {
+  const visitor = take(deps.limiter, deps, c);
+  const request = parseBody(mediaRequestSchema, await readJson(c));
+  if (asksPictureTools(request)) throw new ProxyError('invalid_request', MESSAGES.audioToolsOnly);
+  const { model, slug, settings } = servableAudioModel(request.modelId);
+  const tools = findAudioTools(model.info.id);
+  const chosen = chosenAudio(settings, tools, { text: request.prompt, voice: request.voice });
+  const balance = await deps.gate.balanceOf(c);
+  // A balance holds the most that this request may cost: its text, or its longest audio.
+  const ticket = deps.gate.admit(
+    { visitor, balance },
+    { ...model, media: chosen.settings },
+    request.prompt.length,
+    {
+      webSearch: false,
+      creditOnly: chosen.creditOnly,
+      creditOnlyMessage: MESSAGES.voiceCreditOnly(AUDIO.trialChars),
+    },
+  );
+  let result: AudioResult;
+  try {
+    result = await generateAudio(
+      deps,
+      { slug, privacy: model.info.privacy, settings, tools, voice: chosen.voice },
+      request.prompt,
+      c.req.raw.signal,
+    );
+  } catch (error) {
+    ticket.refund();
+    throw error;
+  }
+  ticket.charge(answerSpend(result.costUsd, null, null));
+  return { audio: { dataUrl: result.dataUrl }, text: result.text };
+}
+
 async function startVideo(
   deps: MediaRouteDeps,
   tickets: TicketSealer,
@@ -108,9 +166,17 @@ async function startVideo(
 ): Promise<VideoJobResponse> {
   const visitor = take(deps.limiter, deps, c);
   const request = parseBody(mediaRequestSchema, await readJson(c));
+  if (asksImageTools(request)) throw new ProxyError('invalid_request', MESSAGES.imageToolsOnly);
+  if (request.voice !== undefined) throw new ProxyError('invalid_request', MESSAGES.voiceAudioOnly);
+  if (request.lastImage !== undefined && request.image === undefined) {
+    throw new ProxyError('invalid_request', MESSAGES.lastFrameAlone);
+  }
   const servable = servableVideoModel(request.modelId);
   const { model, slug } = servable;
-  const settings = chosenVideo(servable.settings, request);
+  const settings = chosenVideo(servable.settings, findVideoTools(model.info.id), {
+    ...request,
+    lastFrame: request.lastImage !== undefined,
+  });
   const balance = await deps.gate.balanceOf(c);
   const admitted = deps.gate.admitPrepaid(
     { visitor, balance },
@@ -153,9 +219,40 @@ async function passVideo(
   return new Response(upstream.body, { status: 200, headers });
 }
 
-/** The prompt of a request and its photo. */
+/** The prompt of a request of a video and its frames. */
 function promptOf(request: MediaRequest): MediaPrompt {
-  return { text: request.prompt, image: request.image ?? null };
+  return {
+    text: request.prompt,
+    image: request.image ?? null,
+    lastImage: request.lastImage ?? null,
+  };
+}
+
+/** True when a request names a tool of the Image or the Video page, which audio takes none of. */
+function asksPictureTools(request: MediaRequest): boolean {
+  return (
+    asksImageTools(request) ||
+    asksVideoTools(request) ||
+    [request.image, request.aspectRatio, request.seconds, request.resolution].some(
+      (value) => value !== undefined,
+    )
+  );
+}
+
+/** True when a request names a tool of the Image page that a video takes none of. */
+function asksImageTools(request: MediaRequest): boolean {
+  return [request.images, request.seed, request.transparent].some((value) => value !== undefined);
+}
+
+/** True when a request names a tool of the Video page, which an image takes none of. */
+function asksVideoTools(request: MediaRequest): boolean {
+  return [request.lastImage, request.silent].some((value) => value !== undefined);
+}
+
+/** The photos of a request of an image: several, one, or none. */
+function photosOf(request: MediaRequest): string[] {
+  if (request.images !== undefined) return request.images;
+  return request.image === undefined ? [] : [request.image];
 }
 
 /** Counts one request of the visitor against a limit, or throws; returns the key of the visitor. */
@@ -187,6 +284,14 @@ function servableVideoModel(modelId: string): MediaModel<VideoSettings> {
   const { model, slug } = servableMediaModel(modelId);
   if (model.media?.kind !== 'video') {
     throw new ProxyError('invalid_request', MESSAGES.notVideoModel);
+  }
+  return { model, slug, settings: model.media };
+}
+
+function servableAudioModel(modelId: string): MediaModel<AudioSettings> {
+  const { model, slug } = servableMediaModel(modelId);
+  if (model.media?.kind !== 'audio') {
+    throw new ProxyError('invalid_request', MESSAGES.notAudioModel);
   }
   return { model, slug, settings: model.media };
 }

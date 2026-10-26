@@ -7,7 +7,8 @@ export const TRIAL = {
   /**
    * The models open in the trial, by catalog id: every model that the proxy serves, since 22 Oct
    * 2026 ("gpp buka aja semua"), but video, which takes credit only (the owner, 23 Oct 2026): one
-   * video costs more than a day of chats. An image counts as one chat of its lane. The counts and
+   * video costs more than a day of chats. An image, or a piece of audio (26 Oct 2026), counts as
+   * one chat of its lane. The counts and
    * budgets below still hold. To lock models for credit again, list the open ids here; every other
    * model then shows "credit". The dearest models below take credit too (catalog.ts).
    */
@@ -27,9 +28,18 @@ export const TRIAL = {
   chatsPerDay: { private: 10, open: 10 },
   /**
    * What the trial of a lane may cost in a day, in USD. Past it, the lane pauses until 00:00 UTC.
-   * The hard limits sit at the providers: an OpenRouter key with $50 of credit, and $15 on Tinfoil.
+   * The private lane went from $2 to $5 with Voice on the trial (the owner, 26 Oct 2026: "budget
+   * harian naikin jadi $5 sekarang mulai banyak pengunjung app kita takut kehabisan"). The hard
+   * limits sit at the providers: an OpenRouter key with $50 of credit, and $15 on Tinfoil.
    */
-  dailyBudgetUsd: { private: 2, open: 5 },
+  dailyBudgetUsd: { private: 5, open: 5 },
+  /**
+   * Requests of Voice that one visitor may send in a day on the trial (26 Oct 2026): recordings
+   * and parts of answers to speak. Each turn of Voice mode is one recording, one chat of the private
+   * lane, and a few parts read aloud, so ten turns fit, while one visitor cannot spend the budget
+   * of the lane on speech alone (at $0.002 a part at Tinfoil, 60 parts cost $0.12).
+   */
+  voiceRequestsPerDay: 60,
   /**
    * The usage counted for an answer whose provider reported none: one chat of docs/CONCEPT.md,
    * 1,000 tokens in and 500 out, at the price of the model in the catalog.
@@ -40,5 +50,6 @@ export const TRIAL = {
   dearest: { chatUsd: number; imageUsd: number };
   chatsPerDay: Readonly<Record<Lane, number>>;
   dailyBudgetUsd: Readonly<Record<Lane, number>>;
+  voiceRequestsPerDay: number;
   fallbackUsage: ChatUsage;
 };

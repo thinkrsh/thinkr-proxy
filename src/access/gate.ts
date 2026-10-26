@@ -46,6 +46,14 @@ export interface ChatTicket {
 export interface ChatOptions {
   /** Web search is on (decision 142): the reserve of a balance holds its price. */
   readonly webSearch: boolean;
+  /**
+   * The request costs more than the defaults of its model, such as an image of a larger size or
+   * of several photos (25 Oct 2026), or a long text to read (26 Oct 2026): only a balance pays, as
+   * for a model locked for credit.
+   */
+  readonly creditOnly?: boolean;
+  /** What the free trial hears when it asks for more than it pays; else that of an image. */
+  readonly creditOnlyMessage?: string;
 }
 
 const PLAIN_CHAT: ChatOptions = { webSearch: false };
@@ -67,12 +75,24 @@ export interface FeeTicket {
   charge: () => void;
 }
 
-/** One admitted Premium request, which only a balance pays. */
+/** One admitted Premium request: a balance pays it, or the free trial for Voice. */
 export interface PremiumTicket {
   /** The enclave failed, so the request costs nothing. */
   refund: () => void;
   /** The request went through; the enclave reported this cost, or null without a report. */
   charge: (reportedCostUsd: number | null) => void;
+}
+
+/**
+ * How the free trial takes a request of Voice (the owner, 26 Oct 2026: Voice opens without a
+ * top-up). Its cost counts against the budget of the private lane, and each turn of Voice mode
+ * still takes one chat of the private lane through its answer.
+ */
+export interface TrialTerms {
+  /** What the request costs at the enclave when the enclave reports nothing. */
+  readonly costUsd: number;
+  /** A recording needs a chat of the private lane left for its answer; a part to speak does not. */
+  readonly needsChat: boolean;
 }
 
 const FREE_PREMIUM: PremiumTicket = { refund: () => undefined, charge: () => undefined };
@@ -115,10 +135,11 @@ export interface Gate {
   admitFee: (payer: Payer, fee: Fee) => FeeTicket;
   /**
    * Admits a Premium request at its price: voice and the privacy filter of the private lane (the
-   * owner, 23 Oct 2026). Only a balance pays; the free trial gets `model_unavailable`, as a model
-   * locked for credit does. The mode 'full' of the laptop admits it free, as it does every chat.
+   * owner, 23 Oct 2026). A balance pays it. The free trial takes a request that comes with `trial`
+   * terms, Voice since 26 Oct 2026, and gets `model_unavailable` for any other, as for a model
+   * locked for credit. The mode 'full' of the laptop admits it free, as it does every chat.
    */
-  admitPremium: (payer: Payer, price: PremiumPrice) => PremiumTicket;
+  admitPremium: (payer: Payer, price: PremiumPrice, trial?: TrialTerms) => PremiumTicket;
   /**
    * Admits a video job at its price, about, which the balance pays once the provider takes the
    * job (the owner, 23 Oct 2026). Only a balance pays; the free trial gets `model_unavailable`. The
@@ -153,13 +174,23 @@ export function createGate(deps: GateDeps): Gate {
     },
     admit(payer, model, inputUnits, options = PLAIN_CHAT) {
       const { balance } = payer;
-      if (balance === null) return admitOnTrial(deps, payer.visitor, model);
+      if (balance === null) {
+        if (options.creditOnly === true && deps.access.mode !== 'full') {
+          throw new ProxyError(
+            'model_unavailable',
+            options.creditOnlyMessage ?? MESSAGES.imageCreditOnly,
+          );
+        }
+        return admitOnTrial(deps, payer.visitor, model);
+      }
       if (balance.micros < reserveMicros(model, inputUnits, options.webSearch)) {
         throw new ProxyError('balance_low', MESSAGES.balanceLow);
       }
       return {
         refund: () => undefined,
         charge: (spend) => {
+          // The totals of decision 191 count chat, image, and video; audio counts as chat, as the
+          // voice of the private lane does.
           const use = model.info.kind === 'image' ? 'image' : 'chat';
           deps.ledger.charge(balance.hash, chatPriceMicros(model, spend), use, deps.now());
         },
@@ -177,11 +208,12 @@ export function createGate(deps: GateDeps): Gate {
         },
       };
     },
-    admitPremium(payer, price) {
+    admitPremium(payer, price, trial) {
       const { balance } = payer;
       if (balance === null) {
         if (deps.access.mode === 'full') return FREE_PREMIUM;
-        throw new ProxyError('model_unavailable', MESSAGES.premiumOnly);
+        if (trial === undefined) throw new ProxyError('model_unavailable', MESSAGES.premiumOnly);
+        return admitVoiceOnTrial(deps, payer.visitor, trial);
       }
       // A request with no fixed price still needs credit left, as its cost comes after.
       if (balance.micros <= 0 || balance.micros < usdToMicros(price.fixedUsd)) {
@@ -232,6 +264,19 @@ function admitFeeOnTrial(deps: GateDeps, visitor: string, fee: Fee): FeeTicket {
     },
     charge: () => {
       deps.access.spend(fee.lane, fee.costUsd, deps.now());
+    },
+  };
+}
+
+/** A request of Voice on the free trial: counted for the visitor, paid from the private lane. */
+function admitVoiceOnTrial(deps: GateDeps, visitor: string, trial: TrialTerms): PremiumTicket {
+  deps.access.admitVoice(visitor, trial.needsChat, deps.now());
+  return {
+    refund: () => {
+      deps.access.refundVoice(visitor, deps.now());
+    },
+    charge: (reportedCostUsd) => {
+      deps.access.spend('private', reportedCostUsd ?? trial.costUsd, deps.now());
     },
   };
 }

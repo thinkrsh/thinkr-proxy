@@ -3,7 +3,10 @@
 // retention; a model of the level Open that only the Images API reaches gets that. Either answer
 // comes whole, with the images as base64. Formats read on 23 Oct 2026:
 // openrouter.ai/docs/api/api-reference/chat/create-a-chat-completion.md (modalities, image_config,
-// message.images) and openrouter.ai/docs/guides/overview/multimodal/image-generation.md.
+// message.images) and openrouter.ai/docs/guides/overview/multimodal/image-generation.md. The tools
+// of the Image page (25 Oct 2026), read that day in the same guide, "Request Parameters": the
+// resolution, the seed, the background, and the output format of the Images API, and its input
+// references; a chat completion takes several photos as parts of its one message.
 import { z } from 'zod';
 
 import { MESSAGES } from '../config/messages.js';
@@ -15,13 +18,22 @@ import {
 } from '../config/openrouter.js';
 import type { ChatUsage, PrivacyLevel } from '../contract.js';
 import { contentParts, type ContentPart, type UpstreamDeps } from '../openrouter/stream.js';
-import { callOpenRouter, mediaUpstreamError, type MediaPrompt } from './upstream.js';
+import type { ImageOptions } from './choice.js';
+import { callOpenRouter, mediaUpstreamError } from './upstream.js';
 
-/** The model of an image, as OpenRouter knows it. */
+/** The model of an image, as OpenRouter knows it, and what the request asks of it. */
 export interface ImageTarget {
   readonly slug: string;
   readonly privacy: PrivacyLevel;
   readonly settings: ImageSettings;
+  readonly options: ImageOptions;
+}
+
+/** The prompt of an image and the photos that the user gave with it: none, one, or several. */
+export interface ImagePrompt {
+  readonly text: string;
+  /** Data URLs: the image to change, or the images to combine. */
+  readonly photos: readonly string[];
 }
 
 /** The JSON body of a chat completion that asks for an image. It names no user and no app. */
@@ -40,7 +52,12 @@ export interface ImagesApiBody {
   prompt: string;
   aspect_ratio: string;
   n: 1;
-  /** The photo to change, when the user gave one. */
+  /** The size, when the user picked one other than the default of the model. */
+  resolution?: string;
+  seed?: number;
+  background?: 'transparent';
+  output_format?: 'png';
+  /** The photos that the user gave: the image to change, or the images to combine. */
   input_references?: { type: 'image_url'; image_url: { url: string } }[];
 }
 
@@ -87,9 +104,10 @@ const IMAGE_DATA_URL = /^data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/=]+$/i;
 /** The type of an image of the Images API that names none (the docs: PNG). */
 const DEFAULT_IMAGE_TYPE = 'image/png';
 
-export function imageChatBody(target: ImageTarget, prompt: MediaPrompt): ImageChatBody {
+export function imageChatBody(target: ImageTarget, prompt: ImagePrompt): ImageChatBody {
   const { api, aspectRatio } = target.settings;
-  const content = prompt.image === null ? prompt.text : contentParts(prompt.text, [prompt.image]);
+  const content =
+    prompt.photos.length === 0 ? prompt.text : contentParts(prompt.text, prompt.photos);
   return {
     model: target.slug,
     messages: [{ role: 'user', content }],
@@ -100,22 +118,33 @@ export function imageChatBody(target: ImageTarget, prompt: MediaPrompt): ImageCh
   };
 }
 
-export function imagesApiBody(target: ImageTarget, prompt: MediaPrompt): ImagesApiBody {
-  const body: ImagesApiBody = {
+export function imagesApiBody(target: ImageTarget, prompt: ImagePrompt): ImagesApiBody {
+  const { resolution, seed, transparent } = target.options;
+  return {
     model: target.slug,
     prompt: prompt.text,
     aspect_ratio: target.settings.aspectRatio,
     n: 1,
+    ...(resolution === null ? {} : { resolution }),
+    ...(seed === null ? {} : { seed }),
+    ...(transparent === null ? {} : { background: 'transparent' as const }),
+    ...(transparent?.format === 'png' ? { output_format: 'png' as const } : {}),
+    ...(prompt.photos.length === 0
+      ? {}
+      : {
+          input_references: prompt.photos.map((url) => ({
+            type: 'image_url' as const,
+            image_url: { url },
+          })),
+        }),
   };
-  if (prompt.image === null) return body;
-  return { ...body, input_references: [{ type: 'image_url', image_url: { url: prompt.image } }] };
 }
 
 /** Makes one image, or throws a ProxyError when OpenRouter fails or the app goes away. */
 export function generateImage(
   deps: UpstreamDeps,
   target: ImageTarget,
-  prompt: MediaPrompt,
+  prompt: ImagePrompt,
   clientSignal: AbortSignal,
 ): Promise<ImageResult> {
   const chat = target.settings.api.name === 'chat';

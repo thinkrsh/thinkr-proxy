@@ -1,14 +1,15 @@
 // The private lane: GET /api/private/attestation passes the proof of the router to the browser,
 // and POST the proof of the privacy filter; POST /api/private/v1/chat/completions forwards a sealed
 // chat to its enclave (decision 64), and POST /api/private/v1/convert/file a sealed document to the
-// document enclave (decision 142). Premium, paid by a balance only (the owner, 23 Oct 2026): POST
+// document enclave (decision 142). Premium (the owner, 23 Oct 2026): POST
 // /api/private/v1/audio/transcriptions and /api/private/v1/audio/speech forward a sealed recording
-// or text to the audio models of the router, and POST /api/private/filter/redact a sealed message
-// to the enclave of the privacy filter.
+// or text to the audio models of the router, which a balance or, since 26 Oct 2026, the free trial
+// pays, and POST /api/private/filter/redact a sealed message to the enclave of the privacy filter,
+// which only a balance pays.
 import { Hono, type Context } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 
-import type { Fee, Gate } from '../access/gate.js';
+import type { Fee, Gate, TrialTerms } from '../access/gate.js';
 import type { PremiumPrice } from '../credit/balance.js';
 import { findTeeModel } from '../catalog.js';
 import { CREDIT } from '../config/credit.js';
@@ -53,6 +54,14 @@ const VOICE_INPUT_PRICE: PremiumPrice = {
 function fixedPremium(fixedUsd: number): PremiumPrice {
   return { fixedUsd, costShare: CREDIT.markup };
 }
+
+/**
+ * Voice on the free trial (the owner, 26 Oct 2026): a recording needs a chat of the private lane
+ * left for its answer, and a part to speak follows an answer that took its chat. Without a report
+ * of the enclave, each counts the fee of Tinfoil against the budget of the lane.
+ */
+const VOICE_INPUT_TRIAL: TrialTerms = { costUsd: TINFOIL.fees.transcriptionUsd, needsChat: true };
+const VOICE_REPLY_TRIAL: TrialTerms = { costUsd: TINFOIL.fees.speechUsd, needsChat: false };
 
 export interface PrivateRouteDeps extends SealedDeps, AttestationDeps {
   readonly now: () => number;
@@ -126,10 +135,10 @@ export function createPrivateRoute(deps: PrivateRouteDeps): Hono {
       return response;
     })
     .post(TINFOIL.transcriptionPath, sizeLimit(SERVER.maxSealedAudioBytes), (c) =>
-      forwardPremium(deps, c, TRANSCRIPTION_ROUTE, VOICE_INPUT_PRICE),
+      forwardPremium(deps, c, TRANSCRIPTION_ROUTE, VOICE_INPUT_PRICE, VOICE_INPUT_TRIAL),
     )
     .post(TINFOIL.speechPath, sizeLimit(SERVER.maxBodyBytes), (c) =>
-      forwardPremium(deps, c, SPEECH_ROUTE, fixedPremium(CREDIT.voiceReplyUsd)),
+      forwardPremium(deps, c, SPEECH_ROUTE, fixedPremium(CREDIT.voiceReplyUsd), VOICE_REPLY_TRIAL),
     )
     .post(
       `${SERVER.privacyFilterPath}${TINFOIL.privacyFilter.redactPath}`,
@@ -140,6 +149,7 @@ export function createPrivateRoute(deps: PrivateRouteDeps): Hono {
           c,
           FILTER_ROUTE,
           fixedPremium(CREDIT.privacyFilterUsd),
+          undefined,
           TINFOIL.privacyFilter.enclaveUrl,
         ),
     );
@@ -147,21 +157,29 @@ export function createPrivateRoute(deps: PrivateRouteDeps): Hono {
 
 /**
  * Forwards one Premium request, which a balance pays once its answer has passed whole: the price
- * of the route, or more when the enclave reports a higher cost. The free trial is refused before
- * the body is read. `enclave` names the one enclave of a route that has its own.
+ * of the route, or more when the enclave reports a higher cost. The free trial takes a request
+ * with `trial` terms and is refused any other before the body is read. `enclave` names the one
+ * enclave of a route that has its own.
  */
 async function forwardPremium(
   deps: PrivateRouteDeps,
   c: Context,
   route: SealedRoute,
   price: PremiumPrice,
+  trial?: TrialTerms,
   enclave?: string,
 ): Promise<Response> {
   const visitor = deps.clientKey(c);
   takeRequest(deps, visitor);
   const balance = await deps.gate.balanceOf(c);
-  const ticket = deps.gate.admitPremium({ visitor, balance }, price);
-  const request = await readSealed(c, route, null, enclave);
+  const ticket = deps.gate.admitPremium({ visitor, balance }, price, trial);
+  let request: SealedRequest;
+  try {
+    request = await readSealed(c, route, null, enclave);
+  } catch (error) {
+    ticket.refund();
+    throw error;
+  }
   let answered = false;
   let response: Response;
   try {

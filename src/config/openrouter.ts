@@ -2,6 +2,7 @@
 // openrouter.ai/docs/guides/routing/provider-selection.md and openrouter.ai/docs/guides/features/zdr.md.
 // Images and video, read on 23 Oct 2026: openrouter.ai/docs/guides/overview/multimodal/
 // image-generation.md, video-generation.md, and api/api-reference/chat/create-a-chat-completion.md.
+// Audio, read on 26 Oct 2026: openrouter.ai/docs/guides/overview/multimodal/tts.md and audio.md.
 import type { PrivacyLevel } from '../contract.js';
 
 /** Provider preferences of a request at the level Open · No retention, the lane ZDR of the app. */
@@ -53,6 +54,17 @@ export const OPENROUTER = {
   videoRequestTimeoutMs: 60_000,
   /** Time allowed to pass one whole video through the proxy. */
   videoContentTimeoutMs: 300_000,
+  /**
+   * The speech API (26 Oct 2026): a voice that reads a text, or a sound, as the bytes of the audio
+   * (openrouter.ai/docs/guides/overview/multimodal/tts.md).
+   */
+  speechPath: '/audio/speech',
+  /**
+   * Time allowed for one piece of audio, which comes whole: a song of three minutes from Lyria 3
+   * Pro took 40 seconds on 26 Oct 2026. It stays under the 100 seconds after which Cloudflare, in
+   * front of the proxy, gives up on an answer and puts its own page in place of the error.
+   */
+  audioTimeoutMs: 90_000,
 } as const;
 
 /** The provider preferences of a model of the open lane, by its privacy level. */

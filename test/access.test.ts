@@ -134,3 +134,75 @@ describe('createAccess, trial', () => {
     });
   });
 });
+
+describe('createAccess, Voice on the trial (26 Oct 2026)', () => {
+  it('takes no chat of the private lane for a request of Voice', () => {
+    const { access } = trial();
+    access.admitVoice('a', true, NOON);
+    access.admitVoice('a', false, NOON);
+    expect(access.status('a', NOON)).toMatchObject({
+      lanes: { private: { chatsLeft: TRIAL.chatsPerDay.private } },
+    });
+  });
+
+  it('refuses a recording once the chats of the private lane are used, but not a part to speak', () => {
+    const { access } = trial();
+    for (let index = 0; index < TRIAL.chatsPerDay.private; index += 1) {
+      access.admit('a', 'private', NOON);
+    }
+    expect(
+      admitError(() => {
+        access.admitVoice('a', true, NOON);
+      }),
+    ).toMatchObject({
+      code: 'quota_exceeded',
+      message: MESSAGES.quotaExceeded,
+    });
+    access.admitVoice('a', false, NOON);
+  });
+
+  it('refuses a visitor past the requests of Voice of a day, and starts again at 00:00 UTC', () => {
+    const { access } = trial();
+    for (let index = 0; index < TRIAL.voiceRequestsPerDay; index += 1) {
+      access.admitVoice('a', false, NOON);
+    }
+    expect(
+      admitError(() => {
+        access.admitVoice('a', false, NOON);
+      }),
+    ).toMatchObject({
+      code: 'quota_exceeded',
+      message: MESSAGES.voiceQuotaExceeded,
+    });
+    access.admitVoice('b', false, NOON);
+    access.admitVoice('a', false, NEXT_DAY);
+  });
+
+  it('gives a request of Voice back when the enclave failed', () => {
+    const { access } = trial();
+    for (let index = 0; index < TRIAL.voiceRequestsPerDay; index += 1) {
+      access.admitVoice('a', false, NOON);
+    }
+    access.refundVoice('a', NOON);
+    access.admitVoice('a', false, NOON);
+  });
+
+  it('refuses Voice once the private lane spent its budget', () => {
+    const { access } = trial();
+    access.spend('private', TRIAL.dailyBudgetUsd.private, NOON);
+    expect(
+      admitError(() => {
+        access.admitVoice('a', false, NOON);
+      }),
+    ).toMatchObject({
+      code: 'trial_paused',
+    });
+  });
+
+  it('limits nothing in full mode', () => {
+    const access = createAccess('full', () => undefined);
+    for (let index = 0; index < TRIAL.voiceRequestsPerDay + 1; index += 1) {
+      access.admitVoice('a', true, NOON);
+    }
+  });
+});

@@ -1,10 +1,13 @@
-// Images and video of the open lane (the owner, 23 Oct 2026): the routes of the proxy, the header
-// and the ticket of a video job, and the states of a job at OpenRouter. Change them here only.
+// Images, video, and audio of the open lane (the owner, 23 and 26 Oct 2026): the routes of the
+// proxy, the header and the ticket of a video job, and the states of a job at OpenRouter. Change
+// them here only.
 import type { VideoStatus } from '../contract.js';
 
 export const MEDIA = {
   /** POST: one image from a prompt. */
   imagesPath: '/images',
+  /** POST: one piece of audio from a prompt or a text (26 Oct 2026): music, a voice, or a sound. */
+  audioPath: '/audio',
   /** POST: a video job from a prompt, which answers with its ticket. */
   videosPath: '/videos',
   /** GET: where the job of the ticket stands. */

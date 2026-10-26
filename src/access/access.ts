@@ -19,6 +19,14 @@ export interface Access {
   refund: (visitor: string, lane: Lane, nowMs: number) => void;
   /** Adds the cost of an answer to what its lane spent today. */
   spend: (lane: Lane, usd: number, nowMs: number) => void;
+  /**
+   * Takes one request of Voice of the visitor (26 Oct 2026), a recording or a part to speak, or
+   * throws: when the private lane spent its budget, when the visitor sent the requests of Voice of
+   * a day, or, with `needsChat`, when no chat of the private lane is left for the answer.
+   */
+  admitVoice: (visitor: string, needsChat: boolean, nowMs: number) => void;
+  /** Gives the request of Voice back when the enclave failed. */
+  refundVoice: (visitor: string, nowMs: number) => void;
   status: (visitor: string, nowMs: number) => AccessStatus;
 }
 
@@ -37,6 +45,8 @@ const FULL_ACCESS: Access = {
   admit: () => undefined,
   refund: () => undefined,
   spend: () => undefined,
+  admitVoice: () => undefined,
+  refundVoice: () => undefined,
   status: () => ({ mode: 'full' }),
 };
 
@@ -44,6 +54,8 @@ interface Day {
   readonly key: string;
   /** Chats of each visitor in each lane, keyed '<lane>:<visitor>'. */
   readonly chats: Map<string, number>;
+  /** Requests of Voice of each visitor. */
+  readonly voice: Map<string, number>;
   readonly spentUsd: Record<Lane, number>;
 }
 
@@ -53,12 +65,16 @@ function utcDay(nowMs: number): string {
   return new Date(nowMs).toISOString().slice(0, 'YYYY-MM-DD'.length);
 }
 
+function newDay(key: string): Day {
+  return { key, chats: new Map(), voice: new Map(), spentUsd: { private: 0, open: 0 } };
+}
+
 function createTrialAccess(log: LogLine): Access {
-  let day: Day = { key: '', chats: new Map(), spentUsd: { private: 0, open: 0 } };
+  let day: Day = newDay('');
 
   const today = (nowMs: number): Day => {
     const key = utcDay(nowMs);
-    if (day.key !== key) day = { key, chats: new Map(), spentUsd: { private: 0, open: 0 } };
+    if (day.key !== key) day = newDay(key);
     return day;
   };
   const chatsOf = (current: Day, visitor: string, lane: Lane): number =>
@@ -95,6 +111,23 @@ function createTrialAccess(log: LogLine): Access {
       if (!wasPaused && paused(current, lane)) {
         log(`Trial paused: the ${lane} lane spent its budget for ${current.key}.`);
       }
+    },
+    admitVoice(visitor, needsChat, nowMs) {
+      const current = today(nowMs);
+      if (paused(current, 'private')) throw new ProxyError('trial_paused', MESSAGES.trialPaused);
+      if (needsChat && chatsOf(current, visitor, 'private') >= TRIAL.chatsPerDay.private) {
+        throw new ProxyError('quota_exceeded', MESSAGES.quotaExceeded);
+      }
+      const used = current.voice.get(visitor) ?? 0;
+      if (used >= TRIAL.voiceRequestsPerDay) {
+        throw new ProxyError('quota_exceeded', MESSAGES.voiceQuotaExceeded);
+      }
+      current.voice.set(visitor, used + 1);
+    },
+    refundVoice(visitor, nowMs) {
+      const current = today(nowMs);
+      const used = current.voice.get(visitor) ?? 0;
+      if (used > 0) current.voice.set(visitor, used - 1);
     },
     status(visitor, nowMs) {
       const current = today(nowMs);

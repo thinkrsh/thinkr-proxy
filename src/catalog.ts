@@ -1,25 +1,34 @@
 // Queries over the model catalog of config/models.ts.
 import type { Access } from './access/access.js';
+import { AUDIO_TOOLS, type AudioTools } from './config/audioTools.js';
 import { CREDIT } from './config/credit.js';
+import { IMAGE_TOOLS, PHOTO_LIMIT, type ImageTools } from './config/imageTools.js';
 import {
   DEFAULT_MODEL_ID,
   MODEL_CATALOG,
+  type AudioSettings,
   type CatalogModel,
+  type ImageSettings,
   type MediaSettings,
   type VideoSettings,
 } from './config/models.js';
+import { LIMITS } from './config/limits.js';
 import { TRIAL } from './config/trial.js';
+import { VIDEO_TOOLS, type VideoTools } from './config/videoTools.js';
 import type {
+  AudioInfo,
   Lane,
+  ImageToolsInfo,
   ListedModel,
   MediaInfo,
   ModelKind,
   ModelsResponse,
   PrivacyLevel,
+  VideoToolsInfo,
 } from './contract.js';
 import { mediaPriceUsd, userPricing } from './credit/balance.js';
 import { tokensUsd } from './lib/cost.js';
-import { videoCostUsd } from './media/choice.js';
+import { defaultVideoSize, secondCostUsd, videoCostUsd } from './media/choice.js';
 
 const PRIVACY_BY_LANE: Readonly<Record<Lane, readonly PrivacyLevel[]>> = {
   open: ['open', 'open-no-retention'],
@@ -59,7 +68,8 @@ function listedModel(model: CatalogModel, access: Pick<Access, 'opens'>): Listed
   return {
     ...info,
     pricing: userPricing(model),
-    media: mediaInfo(model.media),
+    media: mediaInfo(model.media, IMAGE_TOOLS[info.id], VIDEO_TOOLS[info.id]),
+    audio: model.media?.kind === 'audio' ? audioInfo(model.media, findAudioTools(info.id)) : null,
     available: lockReason === null,
     lockReason,
   };
@@ -67,10 +77,15 @@ function listedModel(model: CatalogModel, access: Pick<Access, 'opens'>): Listed
 
 /**
  * One image or one video as the app shows it, at the price that the user pays, about, with the
- * shapes and the lengths that the user may pick, each length at its own price.
+ * shapes and the lengths that the user may pick, each length at its own price, and the tools of
+ * an image model.
  */
-function mediaInfo(media: MediaSettings | undefined): MediaInfo | null {
-  if (media === undefined) return null;
+function mediaInfo(
+  media: MediaSettings | undefined,
+  tools: ImageTools | undefined,
+  videoTools: VideoTools | undefined,
+): MediaInfo | null {
+  if (media === undefined || media.kind === 'audio') return null;
   const priceUsd = mediaPriceUsd(media);
   const aspectRatios = [...media.aspectRatios];
   if (media.kind === 'image') {
@@ -82,23 +97,98 @@ function mediaInfo(media: MediaSettings | undefined): MediaInfo | null {
       resolution: null,
       audio: false,
       priceUsd,
+      ...(tools === undefined ? {} : { tools: toolsInfo(tools) }),
     };
   }
   const { aspectRatio, seconds, resolution, audio } = media;
+  const size = videoTools === undefined ? null : defaultVideoSize(media, videoTools);
   const durations = media.durations.map((length) => ({
     seconds: length,
-    priceUsd: mediaPriceUsd({ costUsd: videoCostUsd(media, length) }),
+    priceUsd: mediaPriceUsd({
+      costUsd: videoCostUsd(media, size, { seconds: length, silent: false }),
+    }),
   }));
-  return { aspectRatio, aspectRatios, durations, seconds, resolution, audio, priceUsd };
+  return {
+    aspectRatio,
+    aspectRatios,
+    durations,
+    seconds,
+    resolution,
+    audio,
+    priceUsd: mediaPriceUsd({ costUsd: videoCostUsd(media, size, { seconds, silent: false }) }),
+    ...(videoTools === undefined ? {} : { videoTools: videoToolsInfo(videoTools) }),
+  };
+}
+
+/** A model of audio as the Audio page shows it, each unit at what the user pays, about. */
+function audioInfo(media: AudioSettings, tools: AudioTools): AudioInfo {
+  return {
+    mode: media.mode,
+    voices: tools.voices.map((voice) => ({ ...voice })),
+    maxChars: tools.maxChars,
+    price: { per: media.rate.per, usd: mediaPriceUsd({ costUsd: media.rate.usd }) },
+  };
+}
+
+/** The tools of a video model as the app shows them, each second at what the user pays, about. */
+function videoToolsInfo(tools: VideoTools): VideoToolsInfo {
+  return {
+    sizes: tools.sizes.map((size) => ({
+      resolution: size.resolution,
+      secondPriceUsd: mediaPriceUsd({ costUsd: secondCostUsd(size, false) }),
+      silentSecondPriceUsd:
+        size.silentSecondUsd === null ? null : mediaPriceUsd({ costUsd: size.silentSecondUsd }),
+    })),
+    silent: tools.silent,
+    lastFrame: tools.lastFrame,
+  };
+}
+
+/** The tools of an image model as the app shows them, each price at what the user pays, about. */
+function toolsInfo(tools: ImageTools): ImageToolsInfo {
+  return {
+    sizes: tools.sizes.map(({ resolution, costUsd }) => ({
+      resolution,
+      priceUsd: mediaPriceUsd({ costUsd }),
+    })),
+    defaultSize: tools.defaultSize,
+    minPhotos: tools.minPhotos,
+    maxPhotos: tools.maxPhotos,
+    photoPriceUsd: mediaPriceUsd({ costUsd: tools.photoCostUsd }),
+    seed: tools.seed,
+    transparent: tools.transparent,
+  };
 }
 
 export function findModel(id: string): CatalogModel | undefined {
   return MODEL_CATALOG.find((model) => model.info.id === id);
 }
 
+/** The tools of a video model of the catalog, which assertCatalogIsValid makes sure it has. */
+export function findVideoTools(id: string): VideoTools {
+  const tools = VIDEO_TOOLS[id];
+  if (tools === undefined) throw new Error(`The video model ${id} has no video tools.`);
+  return tools;
+}
+
+/** The tools of a model of audio of the catalog, which assertCatalogIsValid makes sure it has. */
+export function findAudioTools(id: string): AudioTools {
+  const tools = AUDIO_TOOLS[id];
+  if (tools === undefined) throw new Error(`The audio model ${id} has no audio tools.`);
+  return tools;
+}
+
+/** The tools of an image model of the catalog, which assertCatalogIsValid makes sure it has. */
+export function findImageTools(id: string): ImageTools {
+  const tools = IMAGE_TOOLS[id];
+  if (tools === undefined) throw new Error(`The image model ${id} has no image tools.`);
+  return tools;
+}
+
 /**
  * True for a model that costs more than the free trial allows (config/trial.ts, `dearest`): one
- * image, or one chat of the trial's fallback usage at the price that the user pays.
+ * image or one request of audio, or one chat of the trial's fallback usage at the price that the
+ * user pays.
  */
 export function isDearest(model: Pick<CatalogModel, 'cost' | 'price' | 'media'>): boolean {
   if (model.media !== undefined) return mediaPriceUsd(model.media) > TRIAL.dearest.imageUsd;
@@ -174,9 +264,9 @@ function modelProblems(model: CatalogModel): string[] {
 }
 
 /**
- * An image or a video model names its settings of that kind, runs on the open lane (decision 70),
- * and a video model sits at the level Open: OpenRouter routes no video job under zero data
- * retention.
+ * An image, a video, or an audio model names its settings of that kind, runs on the open lane
+ * (decision 70), and a video model sits at the level Open: OpenRouter routes no video job under
+ * zero data retention.
  */
 function mediaProblems({ info, media }: CatalogModel): string[] {
   if (info.kind === 'text') {
@@ -186,14 +276,20 @@ function mediaProblems({ info, media }: CatalogModel): string[] {
   if (media?.kind !== info.kind) {
     problems.push(`${info.id}: its media settings must be ${info.kind}`);
   }
-  if (info.lane !== 'open') problems.push(`${info.id}: images and video run on the open lane`);
+  if (info.lane !== 'open') {
+    problems.push(`${info.id}: images, video, and audio run on the open lane`);
+  }
   if (info.kind === 'video' && info.privacy !== 'open') {
     problems.push(`${info.id}: video has no zero data retention, so its level is Open`);
   }
   if (media?.kind === 'image' && media.api.name !== 'chat' && info.privacy !== 'open') {
     problems.push(`${info.id}: only a chat completion forces zero data retention on an image`);
   }
-  if (media !== undefined && !media.aspectRatios.includes(media.aspectRatio)) {
+  if (
+    media !== undefined &&
+    media.kind !== 'audio' &&
+    !media.aspectRatios.includes(media.aspectRatio)
+  ) {
     problems.push(`${info.id}: its shapes must hold its default shape`);
   }
   if (media?.kind === 'video') problems.push(...durationProblems(info.id, media));
@@ -229,10 +325,151 @@ export function trialProblems(
   return problems;
 }
 
+/**
+ * Every image model has its tools and nothing else has any; a model with sizes holds its default
+ * size among them, at the cost that the catalog gives one image of it (25 Oct 2026).
+ */
+export function imageToolsProblems(
+  catalog: readonly CatalogModel[],
+  tools: Readonly<Record<string, ImageTools>>,
+): string[] {
+  const problems: string[] = [];
+  const imageIds = new Set<string>();
+  for (const model of catalog) {
+    if (model.media?.kind !== 'image') continue;
+    imageIds.add(model.info.id);
+    problems.push(...toolProblems(model.info.id, model.media, tools[model.info.id]));
+  }
+  for (const id of Object.keys(tools)) {
+    if (!imageIds.has(id)) problems.push(`${id}: image tools for a model that makes no images`);
+  }
+  return problems;
+}
+
+function toolProblems(id: string, media: ImageSettings, tools: ImageTools | undefined): string[] {
+  if (tools === undefined) return [`${id}: an image model needs its image tools`];
+  const problems: string[] = [];
+  if (tools.minPhotos < 0 || tools.minPhotos > tools.maxPhotos || tools.maxPhotos > PHOTO_LIMIT) {
+    problems.push(`${id}: its photos must run from 0 to ${String(PHOTO_LIMIT)}, the fewest first`);
+  }
+  if (tools.transparentFormat !== null && !tools.transparent) {
+    problems.push(`${id}: a format for a transparent background needs one`);
+  }
+  if (tools.sizes.length === 0) {
+    if (tools.defaultSize !== null) problems.push(`${id}: a default size needs sizes`);
+    return problems;
+  }
+  const fallback = tools.sizes.find((size) => size.resolution === tools.defaultSize);
+  if (fallback === undefined) {
+    problems.push(`${id}: its sizes must hold its default size`);
+  } else if (fallback.costUsd !== media.costUsd) {
+    problems.push(`${id}: its default size must cost what the catalog gives one image`);
+  }
+  return problems;
+}
+
+/**
+ * Every model of audio has its tools and nothing else has any; a voice of its own needs the speech
+ * API, a model that charges by the second names its longest audio, and music comes as one piece
+ * through a chat completion (26 Oct 2026).
+ */
+export function audioToolsProblems(
+  catalog: readonly CatalogModel[],
+  tools: Readonly<Record<string, AudioTools>>,
+): string[] {
+  const problems: string[] = [];
+  const audioIds = new Set<string>();
+  for (const model of catalog) {
+    if (model.media?.kind !== 'audio') continue;
+    audioIds.add(model.info.id);
+    problems.push(...audioToolProblems(model.info.id, model.media, tools[model.info.id]));
+  }
+  for (const id of Object.keys(tools)) {
+    if (!audioIds.has(id)) problems.push(`${id}: audio tools for a model that makes no audio`);
+  }
+  return problems;
+}
+
+function audioToolProblems(
+  id: string,
+  media: AudioSettings,
+  tools: AudioTools | undefined,
+): string[] {
+  if (tools === undefined) return [`${id}: a model of audio needs its audio tools`];
+  const problems: string[] = [];
+  if (tools.maxChars <= 0 || tools.maxChars > LIMITS.maxPromptChars) {
+    problems.push(`${id}: its longest text must fit the limit of a prompt`);
+  }
+  if (tools.voices.length > 0 && media.mode !== 'voice') {
+    problems.push(`${id}: only a model of the mode voice has voices`);
+  }
+  if ((media.api === 'chat') !== (tools.format === null)) {
+    problems.push(`${id}: the speech API names its format, a chat completion none`);
+  }
+  if ((media.api === 'chat') !== (media.rate.per === 'piece')) {
+    problems.push(`${id}: music comes as one piece through a chat completion`);
+  }
+  if ((media.rate.per === 'second') !== (tools.maxSeconds !== null)) {
+    problems.push(`${id}: a model that charges by the second names its longest audio`);
+  }
+  return problems;
+}
+
+/** How far the cost of the default size may stray from the estimate of the catalog, which rounds. */
+const VIDEO_COST_TOLERANCE = 0.02;
+
+/**
+ * Every video model has its tools and nothing else has any; a model with sizes holds the resolution
+ * of the catalog among them, at about the cost of the catalog, and only a model with sound may
+ * leave it out (25 Oct 2026).
+ */
+export function videoToolsProblems(
+  catalog: readonly CatalogModel[],
+  tools: Readonly<Record<string, VideoTools>>,
+): string[] {
+  const problems: string[] = [];
+  const videoIds = new Set<string>();
+  for (const model of catalog) {
+    if (model.media?.kind !== 'video') continue;
+    videoIds.add(model.info.id);
+    problems.push(...videoToolProblems(model.info.id, model.media, tools[model.info.id]));
+  }
+  for (const id of Object.keys(tools)) {
+    if (!videoIds.has(id)) problems.push(`${id}: video tools for a model that makes no videos`);
+  }
+  return problems;
+}
+
+function videoToolProblems(
+  id: string,
+  media: VideoSettings,
+  tools: VideoTools | undefined,
+): string[] {
+  if (tools === undefined) return [`${id}: a video model needs its video tools`];
+  const problems: string[] = [];
+  if (tools.silent && !media.audio) {
+    problems.push(`${id}: a model without sound has none to leave out`);
+  }
+  if (tools.sizes.length === 0) return problems;
+  const size = defaultVideoSize(media, tools);
+  if (size === null) {
+    problems.push(`${id}: its sizes must hold its resolution`);
+    return problems;
+  }
+  const cost = videoCostUsd(media, size, { seconds: media.seconds, silent: false });
+  if (Math.abs(cost - media.costUsd) > media.costUsd * VIDEO_COST_TOLERANCE) {
+    problems.push(`${id}: its resolution must cost about what the catalog gives one video`);
+  }
+  return problems;
+}
+
 export function assertCatalogIsValid(): void {
   const problems = [
     ...catalogProblems(MODEL_CATALOG, DEFAULT_MODEL_ID),
     ...trialProblems(MODEL_CATALOG, DEFAULT_MODEL_ID, trialModelIds()),
+    ...imageToolsProblems(MODEL_CATALOG, IMAGE_TOOLS),
+    ...videoToolsProblems(MODEL_CATALOG, VIDEO_TOOLS),
+    ...audioToolsProblems(MODEL_CATALOG, AUDIO_TOOLS),
   ];
   if (problems.length > 0) throw new Error(`Invalid model catalog: ${problems.join('; ')}.`);
 }

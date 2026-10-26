@@ -1,11 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { createAccess, type Access } from '../src/access/access.js';
+import { createGate } from '../src/access/gate.js';
 import { CREDIT } from '../src/config/credit.js';
 import { MESSAGES } from '../src/config/messages.js';
 import { SERVER } from '../src/config/server.js';
 import { TINFOIL } from '../src/config/tinfoil.js';
-import type { AccessMode, ErrorBody, ModelsResponse } from '../src/contract.js';
+import { TRIAL } from '../src/config/trial.js';
+import type { AccessMode, AccessResponse, ErrorBody, ModelsResponse } from '../src/contract.js';
 import { balanceHash, usdToMicros } from '../src/credit/balance.js';
+import { openLedger } from '../src/node/ledger.js';
 import {
   balanceHeader,
   createTestApp,
@@ -32,6 +36,10 @@ interface PremiumRoute {
   readonly costShare: number;
   /** What Tinfoil charges for each request. */
   readonly feeUsd: number;
+  /** Voice, which the free trial takes since 26 Oct 2026; the privacy filter takes credit only. */
+  readonly onTrial: boolean;
+  /** A recording needs a chat of the private lane left on the trial, for its answer. */
+  readonly needsChat: boolean;
 }
 
 const ROUTES: readonly PremiumRoute[] = [
@@ -44,6 +52,8 @@ const ROUTES: readonly PremiumRoute[] = [
     priceUsd: CREDIT.voiceInputUsd,
     costShare: CREDIT.voiceInputCostShare,
     feeUsd: TINFOIL.fees.transcriptionUsd,
+    onTrial: true,
+    needsChat: true,
   },
   {
     name: 'a part of an answer to speak',
@@ -54,6 +64,8 @@ const ROUTES: readonly PremiumRoute[] = [
     priceUsd: CREDIT.voiceReplyUsd,
     costShare: CREDIT.markup,
     feeUsd: TINFOIL.fees.speechUsd,
+    onTrial: true,
+    needsChat: false,
   },
   {
     name: 'a message for the privacy filter',
@@ -64,8 +76,13 @@ const ROUTES: readonly PremiumRoute[] = [
     priceUsd: CREDIT.privacyFilterUsd,
     costShare: CREDIT.markup,
     feeUsd: TINFOIL.fees.privacyFilterUsd,
+    onTrial: false,
+    needsChat: false,
   },
 ];
+
+const VOICE_ROUTES = ROUTES.filter((route) => route.onTrial);
+const CREDIT_ONLY_ROUTES = ROUTES.filter((route) => !route.onTrial);
 
 /** An answer of the enclave, sent at once, with the usage in a header as the router sends it. */
 function sealedAnswer(usage: string | null = null): Response {
@@ -179,17 +196,6 @@ describe.each(ROUTES)('POST $path, $name', (route) => {
     expect(await micros(testApp, secret)).toBe(usdToMicros(1));
   });
 
-  it('refuses the free trial before any forward, as a model locked for credit', async () => {
-    const testApp = appAnswering(() => sealedAnswer());
-    const response = await postPremium(testApp, route);
-    expect(response.status).toBe(403);
-    expect(await errorOf(response)).toEqual({
-      code: 'model_unavailable',
-      message: MESSAGES.premiumOnly,
-    });
-    expect(testApp.fetchMock).not.toHaveBeenCalled();
-  });
-
   it('refuses a balance that cannot cover its price, or that is empty', async () => {
     const testApp = appAnswering(() => sealedAnswer());
     const poor = await fundedBalance(testApp.ledger, route.priceUsd / 2);
@@ -209,6 +215,81 @@ describe.each(ROUTES)('POST $path, $name', (route) => {
     });
     expect(response.status).toBe(400);
     expect(testApp.fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe.each(CREDIT_ONLY_ROUTES)('POST $path on the free trial', (route) => {
+  it('refuses the free trial before any forward, as a model locked for credit', async () => {
+    const testApp = appAnswering(() => sealedAnswer());
+    const response = await postPremium(testApp, route);
+    expect(response.status).toBe(403);
+    expect(await errorOf(response)).toEqual({
+      code: 'model_unavailable',
+      message: MESSAGES.premiumOnly,
+    });
+    expect(testApp.fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+async function accessOf(testApp: TestApp): Promise<AccessResponse> {
+  return (await (await testApp.app.request('/api/access')).json()) as AccessResponse;
+}
+
+describe.each(VOICE_ROUTES)('POST $path, Voice on the free trial (26 Oct 2026)', (route) => {
+  it('forwards without a balance and takes no chat of the private lane', async () => {
+    const testApp = appAnswering(() => sealedAnswer());
+    const response = await postPremium(testApp, route);
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe('sealed');
+    expect(await accessOf(testApp)).toMatchObject({
+      lanes: { private: { chatsLeft: TRIAL.chatsPerDay.private, paused: false } },
+    });
+  });
+
+  it('counts the reported cost against the budget of the private lane, then pauses', async () => {
+    const costUsd = TRIAL.dailyBudgetUsd.private;
+    const testApp = appAnswering(() =>
+      sealedAnswer(`prompt=0,completion=0,total=0,model=other,cost_usd=${String(costUsd)}`),
+    );
+    await (await postPremium(testApp, route)).text();
+    await vi.waitFor(async () => {
+      expect(await accessOf(testApp)).toMatchObject({ lanes: { private: { paused: true } } });
+    });
+    const refused = await postPremium(testApp, route);
+    expect(refused.status).toBe(429);
+    expect(await errorOf(refused)).toMatchObject({ code: 'trial_paused' });
+    expect(testApp.fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('createGate, Voice on the free trial (26 Oct 2026)', () => {
+  const PRICE = { fixedUsd: 0, costShare: 1 };
+  const TERMS = { costUsd: TINFOIL.fees.speechUsd, needsChat: false };
+
+  function gateCounting(spent: number[]): ReturnType<typeof createGate> {
+    const real = createAccess('trial', () => undefined);
+    const access: Access = {
+      ...real,
+      spend: (lane, usd, nowMs) => {
+        if (lane === 'private') spent.push(usd);
+        real.spend(lane, usd, nowMs);
+      },
+    };
+    return createGate({ access, ledger: openLedger(':memory:'), now: () => Date.now() });
+  }
+
+  it('counts the fee of Tinfoil without a report, else the cost that the enclave reports', () => {
+    const spent: number[] = [];
+    const gate = gateCounting(spent);
+    gate.admitPremium({ visitor: 'a', balance: null }, PRICE, TERMS).charge(null);
+    gate.admitPremium({ visitor: 'a', balance: null }, PRICE, TERMS).charge(0.004);
+    expect(spent).toEqual([TINFOIL.fees.speechUsd, 0.004]);
+  });
+
+  it('counts nothing for a request that the enclave failed', () => {
+    const spent: number[] = [];
+    gateCounting(spent).admitPremium({ visitor: 'a', balance: null }, PRICE, TERMS).refund();
+    expect(spent).toEqual([]);
   });
 });
 

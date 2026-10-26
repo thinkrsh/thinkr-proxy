@@ -3,6 +3,7 @@
 import { z } from 'zod';
 
 import { CREDIT, VOUCHER_SIGNATURE } from './config/credit.js';
+import { PHOTO_LIMIT } from './config/imageTools.js';
 import { LIMITS } from './config/limits.js';
 import { MESSAGES } from './config/messages.js';
 
@@ -44,13 +45,42 @@ export interface ModelPricing {
 }
 
 /**
- * What a model makes: the answers of a chat, or an image or a video from a prompt. Images and video
- * run on the open lane only (decision 70); video at the level Open, since OpenRouter routes no
- * video job under zero data retention (openrouter.ai/docs/guides/overview/multimodal/
- * video-generation.md, read 23 Oct 2026).
+ * What a model makes: the answers of a chat, or an image, a video, or audio from a prompt. Images,
+ * video, and audio run on the open lane only (decision 70); video at the level Open, since
+ * OpenRouter routes no video job under zero data retention (openrouter.ai/docs/guides/overview/
+ * multimodal/video-generation.md, read 23 Oct 2026).
  */
-export const MODEL_KINDS = ['text', 'image', 'video'] as const;
+export const MODEL_KINDS = ['text', 'image', 'video', 'audio'] as const;
 export type ModelKind = (typeof MODEL_KINDS)[number];
+
+/**
+ * What the Audio page makes (the owner, 26 Oct 2026): music, a voice that reads a text, or a sound
+ * effect.
+ */
+export const AUDIO_MODES = ['music', 'voice', 'sound'] as const;
+export type AudioMode = (typeof AUDIO_MODES)[number];
+
+/** What a model of audio charges for: each piece it makes, each character it reads, or each second. */
+export const AUDIO_UNITS = ['piece', 'character', 'second'] as const;
+export type AudioUnit = (typeof AUDIO_UNITS)[number];
+
+/** One voice that a model of the mode voice reads with. */
+export interface VoiceOption {
+  /** The id of the provider, such as 'george'. */
+  id: string;
+  name: string;
+}
+
+/** What the Audio page may ask of a model of audio, and what it costs the user (26 Oct 2026). */
+export interface AudioInfo {
+  mode: AudioMode;
+  /** The voices that the user may pick, the default first; empty for a model with one voice. */
+  voices: VoiceOption[];
+  /** The longest prompt, or text to read, in characters. */
+  maxChars: number;
+  /** What the user pays, about: the cost at the provider plus 25% (decision 52), per unit. */
+  price: { per: AudioUnit; usd: number };
+}
 
 /** One length of a video that the user may pick, and what that video costs the user, about. */
 export interface DurationOption {
@@ -77,6 +107,53 @@ export interface MediaInfo {
    * (decision 52). The charge is the cost that the provider reports, plus 25%.
    */
   priceUsd: number;
+  /** What the Image page may ask of an image model beyond its shape; absent for a video. */
+  tools?: ImageToolsInfo;
+  /** What the Video page may ask of a video model beyond its shape and length; absent for an image. */
+  videoTools?: VideoToolsInfo;
+}
+
+/** One resolution of a video that the user may pick, at the price that the user pays, about. */
+export interface VideoSizeOption {
+  /** A resolution such as '720p' or '4K'. */
+  resolution: string;
+  /** One second with sound when the model makes sound. */
+  secondPriceUsd: number;
+  /** One second without sound, when it costs less; else null. */
+  silentSecondPriceUsd: number | null;
+}
+
+/** What the Video page may ask of a video model beyond its shape and its length (25 Oct 2026). */
+export interface VideoToolsInfo {
+  /** The resolutions that the user may pick, smallest first; empty for the one of the model. */
+  sizes: VideoSizeOption[];
+  /** The model makes sound and can leave it out. */
+  silent: boolean;
+  /** The model takes a last frame as well as a first one. */
+  lastFrame: boolean;
+}
+
+/** One size of an image that the user may pick, at the price that the user pays, about. */
+export interface SizeOption {
+  /** A resolution such as '1K' or '4K'. */
+  resolution: string;
+  priceUsd: number;
+}
+
+/** What the Image page may ask of an image model beyond its shape (the owner, 25 Oct 2026). */
+export interface ImageToolsInfo {
+  /** The sizes that the user may pick, smallest first; empty when the model takes no size. */
+  sizes: SizeOption[];
+  /** The size of a request that picks none; null when the model takes no size. */
+  defaultSize: string | null;
+  /** The fewest photos of one request: one for a model that draws in the style of a photo. */
+  minPhotos: number;
+  /** The most photos of one request: the image to change, or the images to combine. */
+  maxPhotos: number;
+  /** What each photo adds, about, at the price that the user pays. */
+  photoPriceUsd: number;
+  seed: boolean;
+  transparent: boolean;
 }
 
 export interface ModelInfo {
@@ -105,8 +182,10 @@ export interface ModelInfo {
    * lane and sends in the model header. Null in the open lane.
    */
   teeModelId: string | null;
-  /** What one image or one video of the model is and costs; null for a model of text. */
+  /** What one image or one video of the model is and costs; null for a model of text or audio. */
   media: MediaInfo | null;
+  /** What the Audio page may ask of a model of audio; null for every other kind. */
+  audio: AudioInfo | null;
 }
 
 /** Why the app shows a model locked: not served yet, or outside the free trial until the top-up. */
@@ -293,31 +372,64 @@ export type ChatEvent =
   | { type: 'error'; code: ErrorCode; message: string };
 
 /** POST /api/images and POST /api/videos: one prompt for a model of that kind (23 Oct 2026). */
-export const mediaRequestSchema = z.strictObject({
-  modelId: z.string().min(1, MESSAGES.modelIdRequired),
-  prompt: z
-    .string()
-    .max(LIMITS.maxPromptChars, MESSAGES.promptTooLong)
-    .refine((prompt) => prompt.trim().length > 0, MESSAGES.promptEmpty),
-  /**
-   * One photo (23 Oct 2026): the image that an image model changes, or the first frame of a
-   * video.
-   */
-  image: imageDataUrlSchema.optional(),
-  /** The shape that the user picked, one of the model's (25 Oct 2026); else its default. */
-  aspectRatio: z
-    .string()
-    .regex(/^\d{1,2}:\d{1,2}$/, MESSAGES.shapeUnavailable)
-    .optional(),
-  /** The length of a video in seconds that the user picked, one of the model's; else its default. */
-  seconds: z.number().int().positive().optional(),
-});
+export const mediaRequestSchema = z
+  .strictObject({
+    modelId: z.string().min(1, MESSAGES.modelIdRequired),
+    prompt: z
+      .string()
+      .max(LIMITS.maxPromptChars, MESSAGES.promptTooLong)
+      .refine((prompt) => prompt.trim().length > 0, MESSAGES.promptEmpty),
+    /**
+     * One photo (23 Oct 2026): the image that an image model changes, or the first frame of a
+     * video.
+     */
+    image: imageDataUrlSchema.optional(),
+    /** The shape that the user picked, one of the model's (25 Oct 2026); else its default. */
+    aspectRatio: z
+      .string()
+      .regex(/^\d{1,2}:\d{1,2}$/, MESSAGES.shapeUnavailable)
+      .optional(),
+    /** The length of a video in seconds that the user picked, one of the model's; else its default. */
+    seconds: z.number().int().positive().optional(),
+    /**
+     * The tools of the Image page (the owner, 25 Oct 2026): several photos to combine, in place of
+     * one; a size of the model's; a seed; and a transparent background.
+     */
+    images: z.array(imageDataUrlSchema).min(2).max(PHOTO_LIMIT, MESSAGES.tooManyPhotos).optional(),
+    /** The size of an image, such as '2K', or the resolution of a video, such as '1080p'. */
+    resolution: z
+      .string()
+      .regex(/^\d+(\.\d+)?[Kp]?$/, MESSAGES.sizeUnavailable)
+      .optional(),
+    seed: z.number().int().min(0).max(LIMITS.maxSeed).optional(),
+    transparent: z.literal(true).optional(),
+    /**
+     * The tools of the Video page (the owner, 25 Oct 2026): the last frame, as `image` is the
+     * first; and a video without sound.
+     */
+    lastImage: imageDataUrlSchema.optional(),
+    silent: z.literal(true).optional(),
+    /** The voice that reads the text on the Audio page (26 Oct 2026), one of the model's. */
+    voice: z.string().min(1).max(LIMITS.maxVoiceIdChars, MESSAGES.voiceUnavailable).optional(),
+  })
+  .refine((request) => request.image === undefined || request.images === undefined, {
+    message: MESSAGES.photosTwice,
+  });
 
 export type MediaRequest = z.infer<typeof mediaRequestSchema>;
 
 /** The answer of POST /api/images: the images as data URLs, and any text the model wrote with them. */
 export interface ImageResponse {
   images: { dataUrl: string }[];
+  text: string;
+}
+
+/**
+ * The answer of POST /api/audio (26 Oct 2026): the audio as a data URL, MP3 or WAV, and any text
+ * the model wrote with it, such as the lyrics of a song.
+ */
+export interface AudioResponse {
+  audio: { dataUrl: string };
   text: string;
 }
 

@@ -13,6 +13,19 @@ export function toBase64Url(bytes: Uint8Array): string {
   return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
 }
 
+/** Bytes in base64 with padding, as a data URL carries them. */
+export function toBase64(bytes: Uint8Array): string {
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+/** Base64 with padding, such as one part of the audio of a stream, back to bytes. */
+export function fromBase64(text: string): Uint8Array {
+  const binary = atob(text);
+  return Uint8Array.from(binary, (char) => char.charCodeAt(0));
+}
+
 export function toHex(bytes: Uint8Array): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 }

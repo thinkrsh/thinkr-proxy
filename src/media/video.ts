@@ -26,8 +26,12 @@ export interface VideoUpstreamBody {
   resolution: string;
   aspect_ratio: string;
   generate_audio: boolean;
-  /** The photo that the video starts from, when the user gave one. */
-  frame_images?: { type: 'image_url'; image_url: { url: string }; frame_type: 'first_frame' }[];
+  /** The photos that the video starts from and ends on, when the user gave them. */
+  frame_images?: {
+    type: 'image_url';
+    image_url: { url: string };
+    frame_type: 'first_frame' | 'last_frame';
+  }[];
 }
 
 type FrameImage = NonNullable<VideoUpstreamBody['frame_images']>[number];
@@ -58,12 +62,13 @@ export function videoUpstreamBody(target: VideoTarget, prompt: MediaPrompt): Vid
     generate_audio: settings.audio,
   };
   if (prompt.image === null) return body;
-  const frame: FrameImage = {
-    type: 'image_url',
-    image_url: { url: prompt.image },
-    frame_type: 'first_frame',
-  };
-  return { ...body, frame_images: [frame] };
+  const frames: FrameImage[] = [frameOf(prompt.image, 'first_frame')];
+  if (prompt.lastImage !== null) frames.push(frameOf(prompt.lastImage, 'last_frame'));
+  return { ...body, frame_images: frames };
+}
+
+function frameOf(url: string, frameType: FrameImage['frame_type']): FrameImage {
+  return { type: 'image_url', image_url: { url }, frame_type: frameType };
 }
 
 /** Starts a job and returns its id at OpenRouter. */

@@ -22,6 +22,10 @@ export const LIMITS = {
   maxImagesPerChat: 20,
   /** Characters of the data URL of one photo: a scaled JPEG stays far below it. */
   maxImageDataUrlChars: 4_000_000,
+  /** Characters of the id of a voice of the Audio page, such as 'en-US-Harper:MAI-Voice-2.1'. */
+  maxVoiceIdChars: 64,
+  /** The largest seed of an image, a signed 32-bit integer, which every provider takes. */
+  maxSeed: 2_147_483_647,
   /**
    * Checks of a video job and downloads of its video allowed per client address in one window,
    * apart from the limit of chats: the app checks a job every few seconds while it renders.

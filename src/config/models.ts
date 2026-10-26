@@ -35,10 +35,17 @@
 //   model reaches ZDR only through a chat completion. Price: 25% under Venice (GET
 //   https://api.venice.ai/api/v1/models?type=all, 25 Oct 2026) where Venice serves the model and
 //   that comes under the cost plus 25%, input and output apart; else null.
-import type { ModelInfo, ModelPricing } from '../contract.js';
+// - Audio (the owner, 26 Oct 2026), read on 26 Oct 2026: GET
+//   https://openrouter.ai/api/v1/models?output_modalities=speech and ?output_modalities=audio,
+//   /api/v1/endpoints/zdr, and the endpoints of each model. Music is Lyria 3 at the level Open
+//   (no ZDR endpoint; $0.08 a song, $0.04 a clip of 30 seconds, from the description of each); a
+//   voice or a sound with a ZDR endpoint sits at the level Open · No retention, one without at the
+//   level Open. Each answered one test request that day. The voices and the formats are in
+//   config/audioTools.ts.
+import type { AudioMode, AudioUnit, ModelInfo, ModelPricing } from '../contract.js';
 
-/** What the catalog knows of a model. The proxy adds the price that the user pays. */
-export type CatalogInfo = Omit<ModelInfo, 'pricing' | 'media'>;
+/** What the catalog knows of a model. The proxy adds the price and the tools that the user sees. */
+export type CatalogInfo = Omit<ModelInfo, 'pricing' | 'media' | 'audio'>;
 
 /**
  * How OpenRouter takes an image request: a chat completion, which can force zero data retention,
@@ -94,7 +101,32 @@ export interface VideoSettings {
   readonly costUsd: number;
 }
 
-export type MediaSettings = ImageSettings | VideoSettings;
+/**
+ * What the proxy asks of a model of audio (the owner, 26 Oct 2026), what it charges for, and what
+ * one request costs Thinkr, about.
+ */
+export interface AudioSettings {
+  readonly kind: 'audio';
+  readonly mode: AudioMode;
+  /**
+   * How OpenRouter takes it: the speech API (openrouter.ai/docs/guides/overview/multimodal/tts.md),
+   * or a chat completion whose stream carries the audio (Lyria, .../multimodal/audio.md).
+   */
+  readonly api: 'speech' | 'chat';
+  /**
+   * What the provider charges for each unit, in USD: each character read, each second made (Gemini
+   * TTS charges its audio tokens, AUDIO.geminiTokensPerSecond a second), or each piece.
+   */
+  readonly rate: { readonly per: AudioUnit; readonly usd: number };
+  /**
+   * One request at the provider, about: a text of AUDIO.trialChars for a voice, about ten seconds
+   * for a sound, one piece of music. The free trial takes the model while its price stays under
+   * TRIAL.dearest.imageUsd. A paid request costs what its audio cost, plus 25% (decision 52).
+   */
+  readonly costUsd: number;
+}
+
+export type MediaSettings = ImageSettings | VideoSettings | AudioSettings;
 
 export interface CatalogModel {
   readonly info: CatalogInfo;
@@ -110,7 +142,7 @@ export interface CatalogModel {
    * charged. Null: a paid chat costs what its answer cost, plus 25% (decision 52).
    */
   readonly price: ModelPricing | null;
-  /** An image or a video model: what the proxy asks of it. Absent for a model of text. */
+  /** A model of images, video, or audio: what the proxy asks of it. Absent for a model of text. */
   readonly media?: MediaSettings;
 }
 
@@ -2894,7 +2926,7 @@ export const MODEL_CATALOG: readonly CatalogModel[] = [
     media: {
       kind: 'image',
       aspectRatio: '16:9',
-      aspectRatios: ['16:9', '1:1', '9:16'],
+      aspectRatios: ['16:9', '1:1', '9:16', '21:9', '3:2', '4:3', '5:4', '4:5', '3:4', '2:3'],
       api: { name: 'chat', modalities: ['image', 'text'] },
       costUsd: 0.14,
     },
@@ -2923,7 +2955,7 @@ export const MODEL_CATALOG: readonly CatalogModel[] = [
     media: {
       kind: 'image',
       aspectRatio: '16:9',
-      aspectRatios: ['16:9', '1:1', '9:16'],
+      aspectRatios: ['16:9', '1:1', '9:16', '21:9', '3:2', '4:3', '5:4', '4:5', '3:4', '2:3'],
       api: { name: 'chat', modalities: ['image', 'text'] },
       costUsd: 0.07,
     },
@@ -2951,7 +2983,21 @@ export const MODEL_CATALOG: readonly CatalogModel[] = [
     media: {
       kind: 'image',
       aspectRatio: '16:9',
-      aspectRatios: ['16:9', '1:1', '9:16'],
+      aspectRatios: [
+        '16:9',
+        '1:1',
+        '9:16',
+        '21:9',
+        '2:1',
+        '3:2',
+        '4:3',
+        '5:4',
+        '4:5',
+        '3:4',
+        '2:3',
+        '1:2',
+        '9:21',
+      ],
       api: { name: 'chat', modalities: ['image'] },
       costUsd: 0.05,
     },
@@ -2980,7 +3026,7 @@ export const MODEL_CATALOG: readonly CatalogModel[] = [
     media: {
       kind: 'image',
       aspectRatio: '16:9',
-      aspectRatios: ['16:9', '1:1', '9:16'],
+      aspectRatios: ['16:9', '1:1', '9:16', '3:2', '4:3', '3:4', '2:3'],
       api: { name: 'chat', modalities: ['image'] },
       costUsd: 0.04,
     },
@@ -3008,7 +3054,7 @@ export const MODEL_CATALOG: readonly CatalogModel[] = [
     media: {
       kind: 'image',
       aspectRatio: '16:9',
-      aspectRatios: ['16:9', '1:1', '9:16'],
+      aspectRatios: ['16:9', '1:1', '9:16', '21:9', '3:2', '4:3', '5:4', '4:5', '3:4', '2:3'],
       api: { name: 'chat', modalities: ['image', 'text'] },
       costUsd: 0.034,
     },
@@ -3037,7 +3083,7 @@ export const MODEL_CATALOG: readonly CatalogModel[] = [
     media: {
       kind: 'image',
       aspectRatio: '16:9',
-      aspectRatios: ['16:9', '1:1', '9:16'],
+      aspectRatios: ['16:9', '1:1', '9:16', '21:9', '3:2', '4:3', '3:4', '2:3'],
       api: { name: 'images' },
       costUsd: 0.13,
     },
@@ -3058,16 +3104,31 @@ export const MODEL_CATALOG: readonly CatalogModel[] = [
     },
   },
   {
-    // No ZDR endpoint. Cost: an image of about 4,175 tokens at $9.82 a million, about $0.04.
+    // No ZDR endpoint. Cost: $0.048 an image at 1K, its size when the request names none (GET
+    // /api/v1/images/models/black-forest-labs/flux-3-image/endpoints, 25 Oct 2026).
     openRouterSlug: 'black-forest-labs/flux-3-image',
     cost: null,
     price: null,
     media: {
       kind: 'image',
       aspectRatio: '16:9',
-      aspectRatios: ['16:9', '1:1', '9:16'],
+      aspectRatios: [
+        '16:9',
+        '1:1',
+        '9:16',
+        '21:9',
+        '2:1',
+        '3:2',
+        '4:3',
+        '5:4',
+        '4:5',
+        '3:4',
+        '2:3',
+        '1:2',
+        '9:21',
+      ],
       api: { name: 'images' },
-      costUsd: 0.04,
+      costUsd: 0.048,
     },
     info: {
       id: 'open/flux-3',
@@ -3093,7 +3154,7 @@ export const MODEL_CATALOG: readonly CatalogModel[] = [
     media: {
       kind: 'image',
       aspectRatio: '16:9',
-      aspectRatios: ['16:9', '1:1', '9:16'],
+      aspectRatios: ['16:9', '1:1', '9:16', '2:1', '3:2', '4:3', '3:4', '2:3', '1:2'],
       api: { name: 'images' },
       costUsd: 0.05,
     },
@@ -3122,7 +3183,7 @@ export const MODEL_CATALOG: readonly CatalogModel[] = [
     media: {
       kind: 'image',
       aspectRatio: '16:9',
-      aspectRatios: ['16:9', '1:1', '9:16'],
+      aspectRatios: ['16:9', '1:1', '9:16', '21:9', '3:2', '4:3', '3:4', '2:3'],
       api: { name: 'images' },
       costUsd: 0.13,
     },
@@ -3151,7 +3212,7 @@ export const MODEL_CATALOG: readonly CatalogModel[] = [
     media: {
       kind: 'image',
       aspectRatio: '16:9',
-      aspectRatios: ['16:9', '1:1', '9:16'],
+      aspectRatios: ['16:9', '1:1', '9:16', '21:9', '3:2', '4:3', '3:4', '2:3'],
       api: { name: 'images' },
       costUsd: 0.13,
     },
@@ -3263,7 +3324,7 @@ export const MODEL_CATALOG: readonly CatalogModel[] = [
     media: {
       kind: 'image',
       aspectRatio: '16:9',
-      aspectRatios: ['16:9', '1:1', '9:16'],
+      aspectRatios: ['16:9', '1:1', '9:16', '21:9', '3:2', '4:3', '5:4', '4:5', '3:4', '2:3'],
       api: { name: 'chat', modalities: ['image', 'text'] },
       costUsd: 0.034,
     },
@@ -3291,7 +3352,7 @@ export const MODEL_CATALOG: readonly CatalogModel[] = [
     media: {
       kind: 'image',
       aspectRatio: '16:9',
-      aspectRatios: ['16:9', '1:1', '9:16'],
+      aspectRatios: ['16:9', '1:1', '9:16', '2:1', '3:2', '4:3', '3:4', '2:3', '1:2'],
       api: { name: 'images' },
       costUsd: 0.05,
     },
@@ -3319,7 +3380,7 @@ export const MODEL_CATALOG: readonly CatalogModel[] = [
     media: {
       kind: 'image',
       aspectRatio: '16:9',
-      aspectRatios: ['16:9', '1:1', '9:16'],
+      aspectRatios: ['16:9', '1:1', '9:16', '2:1', '3:2', '4:3', '5:4', '4:5', '3:4', '2:3', '1:2'],
       api: { name: 'images' },
       costUsd: 0.0184,
     },
@@ -3347,7 +3408,7 @@ export const MODEL_CATALOG: readonly CatalogModel[] = [
     media: {
       kind: 'image',
       aspectRatio: '16:9',
-      aspectRatios: ['16:9', '1:1', '9:16'],
+      aspectRatios: ['16:9', '1:1', '9:16', '2:1', '3:2', '4:3', '5:4', '4:5', '3:4', '2:3', '1:2'],
       api: { name: 'images' },
       costUsd: 0.046,
     },
@@ -3375,7 +3436,7 @@ export const MODEL_CATALOG: readonly CatalogModel[] = [
     media: {
       kind: 'image',
       aspectRatio: '16:9',
-      aspectRatios: ['16:9', '1:1', '9:16'],
+      aspectRatios: ['16:9', '1:1', '9:16', '2:1', '3:2', '4:3', '5:4', '4:5', '3:4', '2:3', '1:2'],
       api: { name: 'images' },
       costUsd: 0.03,
     },
@@ -3403,7 +3464,7 @@ export const MODEL_CATALOG: readonly CatalogModel[] = [
     media: {
       kind: 'image',
       aspectRatio: '16:9',
-      aspectRatios: ['16:9', '1:1', '9:16'],
+      aspectRatios: ['16:9', '1:1', '9:16', '2:1', '3:2', '4:3', '5:4', '4:5', '3:4', '2:3', '1:2'],
       api: { name: 'images' },
       costUsd: 0.04,
     },
@@ -3432,7 +3493,21 @@ export const MODEL_CATALOG: readonly CatalogModel[] = [
     media: {
       kind: 'image',
       aspectRatio: '16:9',
-      aspectRatios: ['16:9', '1:1', '9:16'],
+      aspectRatios: [
+        '16:9',
+        '1:1',
+        '9:16',
+        '21:9',
+        '2:1',
+        '3:2',
+        '4:3',
+        '5:4',
+        '4:5',
+        '3:4',
+        '2:3',
+        '1:2',
+        '9:21',
+      ],
       api: { name: 'images' },
       costUsd: 0.018,
     },
@@ -3461,7 +3536,21 @@ export const MODEL_CATALOG: readonly CatalogModel[] = [
     media: {
       kind: 'image',
       aspectRatio: '16:9',
-      aspectRatios: ['16:9', '1:1', '9:16'],
+      aspectRatios: [
+        '16:9',
+        '1:1',
+        '9:16',
+        '21:9',
+        '2:1',
+        '3:2',
+        '4:3',
+        '5:4',
+        '4:5',
+        '3:4',
+        '2:3',
+        '1:2',
+        '9:21',
+      ],
       api: { name: 'images' },
       costUsd: 0.035,
     },
@@ -3490,7 +3579,21 @@ export const MODEL_CATALOG: readonly CatalogModel[] = [
     media: {
       kind: 'image',
       aspectRatio: '16:9',
-      aspectRatios: ['16:9', '1:1', '9:16'],
+      aspectRatios: [
+        '16:9',
+        '1:1',
+        '9:16',
+        '21:9',
+        '2:1',
+        '3:2',
+        '4:3',
+        '5:4',
+        '4:5',
+        '3:4',
+        '2:3',
+        '1:2',
+        '9:21',
+      ],
       api: { name: 'images' },
       costUsd: 0.04,
     },
@@ -3518,7 +3621,21 @@ export const MODEL_CATALOG: readonly CatalogModel[] = [
     media: {
       kind: 'image',
       aspectRatio: '16:9',
-      aspectRatios: ['16:9', '1:1', '9:16'],
+      aspectRatios: [
+        '16:9',
+        '1:1',
+        '9:16',
+        '21:9',
+        '2:1',
+        '3:2',
+        '4:3',
+        '5:4',
+        '4:5',
+        '3:4',
+        '2:3',
+        '1:2',
+        '9:21',
+      ],
       api: { name: 'images' },
       costUsd: 0.009,
     },
@@ -3546,7 +3663,7 @@ export const MODEL_CATALOG: readonly CatalogModel[] = [
     media: {
       kind: 'image',
       aspectRatio: '16:9',
-      aspectRatios: ['16:9', '1:1', '9:16'],
+      aspectRatios: ['16:9', '1:1', '9:16', '21:9', '3:2', '4:3', '3:4', '2:3'],
       api: { name: 'images' },
       costUsd: 0.014,
     },
@@ -3574,7 +3691,7 @@ export const MODEL_CATALOG: readonly CatalogModel[] = [
     media: {
       kind: 'image',
       aspectRatio: '16:9',
-      aspectRatios: ['16:9', '1:1', '9:16'],
+      aspectRatios: ['16:9', '1:1', '9:16', '21:9', '3:2', '4:3', '3:4', '2:3'],
       api: { name: 'images' },
       costUsd: 0.07,
     },
@@ -3602,7 +3719,7 @@ export const MODEL_CATALOG: readonly CatalogModel[] = [
     media: {
       kind: 'image',
       aspectRatio: '16:9',
-      aspectRatios: ['16:9', '1:1', '9:16'],
+      aspectRatios: ['16:9', '1:1', '9:16', '21:9', '3:2', '4:3', '3:4', '2:3'],
       api: { name: 'images' },
       costUsd: 0.06,
     },
@@ -3630,7 +3747,7 @@ export const MODEL_CATALOG: readonly CatalogModel[] = [
     media: {
       kind: 'image',
       aspectRatio: '16:9',
-      aspectRatios: ['16:9', '1:1', '9:16'],
+      aspectRatios: ['16:9', '1:1', '9:16', '21:9', '3:2', '4:3', '3:4', '2:3'],
       api: { name: 'images' },
       costUsd: 0.03,
     },
@@ -3659,7 +3776,7 @@ export const MODEL_CATALOG: readonly CatalogModel[] = [
     media: {
       kind: 'image',
       aspectRatio: '16:9',
-      aspectRatios: ['16:9', '1:1', '9:16'],
+      aspectRatios: ['16:9', '1:1', '9:16', '3:2', '4:3', '3:4', '2:3'],
       api: { name: 'images' },
       costUsd: 0.019,
     },
@@ -3688,7 +3805,7 @@ export const MODEL_CATALOG: readonly CatalogModel[] = [
     media: {
       kind: 'image',
       aspectRatio: '16:9',
-      aspectRatios: ['16:9', '1:1', '9:16'],
+      aspectRatios: ['16:9', '1:1', '9:16', '3:2', '4:3', '3:4', '2:3'],
       api: { name: 'images' },
       costUsd: 0.11,
     },
@@ -3717,7 +3834,7 @@ export const MODEL_CATALOG: readonly CatalogModel[] = [
     media: {
       kind: 'image',
       aspectRatio: '16:9',
-      aspectRatios: ['16:9', '1:1', '9:16'],
+      aspectRatios: ['16:9', '1:1', '9:16', '3:2', '4:3', '3:4', '2:3'],
       api: { name: 'images' },
       costUsd: 0.048,
     },
@@ -3745,7 +3862,7 @@ export const MODEL_CATALOG: readonly CatalogModel[] = [
     media: {
       kind: 'image',
       aspectRatio: '16:9',
-      aspectRatios: ['16:9', '1:1', '9:16'],
+      aspectRatios: ['16:9', '1:1', '9:16', '4:3', '3:4'],
       api: { name: 'images' },
       costUsd: 0.21,
     },
@@ -3773,7 +3890,7 @@ export const MODEL_CATALOG: readonly CatalogModel[] = [
     media: {
       kind: 'image',
       aspectRatio: '16:9',
-      aspectRatios: ['16:9', '1:1', '9:16'],
+      aspectRatios: ['16:9', '1:1', '9:16', '4:3', '3:4'],
       api: { name: 'images' },
       costUsd: 0.035,
     },
@@ -3801,7 +3918,7 @@ export const MODEL_CATALOG: readonly CatalogModel[] = [
     media: {
       kind: 'image',
       aspectRatio: '16:9',
-      aspectRatios: ['16:9', '1:1', '9:16'],
+      aspectRatios: ['16:9', '1:1', '9:16', '4:3', '3:4'],
       api: { name: 'images' },
       costUsd: 0.25,
     },
@@ -3829,7 +3946,7 @@ export const MODEL_CATALOG: readonly CatalogModel[] = [
     media: {
       kind: 'image',
       aspectRatio: '16:9',
-      aspectRatios: ['16:9', '1:1', '9:16'],
+      aspectRatios: ['16:9', '1:1', '9:16', '4:3', '3:4'],
       api: { name: 'images' },
       costUsd: 0.04,
     },
@@ -3850,6 +3967,268 @@ export const MODEL_CATALOG: readonly CatalogModel[] = [
     },
   },
   {
+    // No ZDR endpoint. Cost: $0.035 an image and $0.005 a request with its style images at Recraft (GET /api/v1/images/models/recraft/recraft-v4-styles/endpoints, 25 Oct
+    // 2026). Held back on 25 Oct 2026 until the Image page took it (decision 204).
+    openRouterSlug: 'recraft/recraft-v4-styles',
+    cost: null,
+    price: null,
+    media: {
+      kind: 'image',
+      aspectRatio: '16:9',
+      aspectRatios: ['16:9', '1:1', '9:16', '2:1', '3:2', '4:3', '5:4', '4:5', '3:4', '2:3', '1:2'],
+      api: { name: 'images' },
+      costUsd: 0.04,
+    },
+    info: {
+      id: 'open/recraft-v4-styles',
+      name: 'Recraft V4 Styles',
+      maker: 'Recraft',
+      makerSlug: 'recraft',
+      kind: 'image',
+      lane: 'open',
+      privacy: 'open',
+      description: "Recraft's V4 in the style of the images you give it.",
+      contextTokens: 0,
+      reasoning: false,
+      vision: false,
+      available: true,
+      teeModelId: null,
+    },
+  },
+  {
+    // No ZDR endpoint. Cost: $0.10 an image and $0.005 a request with its style images at Recraft (GET /api/v1/images/models/recraft/recraft-v4-styles-pro/endpoints, 25 Oct
+    // 2026). Held back on 25 Oct 2026 until the Image page took it (decision 204).
+    openRouterSlug: 'recraft/recraft-v4-styles-pro',
+    cost: null,
+    price: null,
+    media: {
+      kind: 'image',
+      aspectRatio: '16:9',
+      aspectRatios: ['16:9', '1:1', '9:16', '2:1', '3:2', '4:3', '5:4', '4:5', '3:4', '2:3', '1:2'],
+      api: { name: 'images' },
+      costUsd: 0.105,
+    },
+    info: {
+      id: 'open/recraft-v4-styles-pro',
+      name: 'Recraft V4 Styles Pro',
+      maker: 'Recraft',
+      makerSlug: 'recraft',
+      kind: 'image',
+      lane: 'open',
+      privacy: 'open',
+      description: "Recraft's V4 Pro in the style of the images you give it, for more detail.",
+      contextTokens: 0,
+      reasoning: false,
+      vision: false,
+      available: true,
+      teeModelId: null,
+    },
+  },
+  {
+    // No ZDR endpoint. Cost: $0.05 an image and $0.005 a request with its style images at Recraft (GET /api/v1/images/models/recraft/recraft-v4-styles-vector/endpoints, 25 Oct
+    // 2026). Held back on 25 Oct 2026 until the Image page took it (decision 204).
+    openRouterSlug: 'recraft/recraft-v4-styles-vector',
+    cost: null,
+    price: null,
+    media: {
+      kind: 'image',
+      aspectRatio: '16:9',
+      aspectRatios: ['16:9', '1:1', '9:16', '2:1', '3:2', '4:3', '5:4', '4:5', '3:4', '2:3', '1:2'],
+      api: { name: 'images' },
+      costUsd: 0.055,
+    },
+    info: {
+      id: 'open/recraft-v4-styles-vector',
+      name: 'Recraft V4 Styles Vector',
+      maker: 'Recraft',
+      makerSlug: 'recraft',
+      kind: 'image',
+      lane: 'open',
+      privacy: 'open',
+      description: "Recraft's V4 drawings as SVG files, in the style of the images you give it.",
+      contextTokens: 0,
+      reasoning: false,
+      vision: false,
+      available: true,
+      teeModelId: null,
+    },
+  },
+  {
+    // No ZDR endpoint. Cost: $0.12 an image and $0.005 a request with its style images at Recraft (GET /api/v1/images/models/recraft/recraft-v4-styles-pro-vector/endpoints, 25 Oct
+    // 2026). Held back on 25 Oct 2026 until the Image page took it (decision 204).
+    openRouterSlug: 'recraft/recraft-v4-styles-pro-vector',
+    cost: null,
+    price: null,
+    media: {
+      kind: 'image',
+      aspectRatio: '16:9',
+      aspectRatios: ['16:9', '1:1', '9:16', '2:1', '3:2', '4:3', '5:4', '4:5', '3:4', '2:3', '1:2'],
+      api: { name: 'images' },
+      costUsd: 0.125,
+    },
+    info: {
+      id: 'open/recraft-v4-styles-pro-vector',
+      name: 'Recraft V4 Styles Pro Vector',
+      maker: 'Recraft',
+      makerSlug: 'recraft',
+      kind: 'image',
+      lane: 'open',
+      privacy: 'open',
+      description:
+        "Recraft's V4 Pro drawings as SVG files, in the style of the images you give it.",
+      contextTokens: 0,
+      reasoning: false,
+      vision: false,
+      available: true,
+      teeModelId: null,
+    },
+  },
+  {
+    // No ZDR endpoint. Cost: $0.08 an image at Recraft (GET /api/v1/images/models/recraft/recraft-v4.1-vector/endpoints, 25 Oct
+    // 2026). Held back on 25 Oct 2026 until the Image page took it (decision 204).
+    openRouterSlug: 'recraft/recraft-v4.1-vector',
+    cost: null,
+    price: null,
+    media: {
+      kind: 'image',
+      aspectRatio: '16:9',
+      aspectRatios: ['16:9', '1:1', '9:16', '4:3', '3:4'],
+      api: { name: 'images' },
+      costUsd: 0.08,
+    },
+    info: {
+      id: 'open/recraft-v4.1-vector',
+      name: 'Recraft V4.1 Vector',
+      maker: 'Recraft',
+      makerSlug: 'recraft',
+      kind: 'image',
+      lane: 'open',
+      privacy: 'open',
+      description: "Recraft's V4.1 drawings as SVG files, for logos and icons.",
+      contextTokens: 0,
+      reasoning: false,
+      vision: false,
+      available: true,
+      teeModelId: null,
+    },
+  },
+  {
+    // No ZDR endpoint. Cost: $0.30 an image at Recraft (GET /api/v1/images/models/recraft/recraft-v4.1-pro-vector/endpoints, 25 Oct
+    // 2026). Held back on 25 Oct 2026 until the Image page took it (decision 204).
+    openRouterSlug: 'recraft/recraft-v4.1-pro-vector',
+    cost: null,
+    price: null,
+    media: {
+      kind: 'image',
+      aspectRatio: '16:9',
+      aspectRatios: ['16:9', '1:1', '9:16', '4:3', '3:4'],
+      api: { name: 'images' },
+      costUsd: 0.3,
+    },
+    info: {
+      id: 'open/recraft-v4.1-pro-vector',
+      name: 'Recraft V4.1 Pro Vector',
+      maker: 'Recraft',
+      makerSlug: 'recraft',
+      kind: 'image',
+      lane: 'open',
+      privacy: 'open',
+      description: "Recraft's V4.1 Pro drawings as SVG files, with more detail.",
+      contextTokens: 0,
+      reasoning: false,
+      vision: false,
+      available: true,
+      teeModelId: null,
+    },
+  },
+  {
+    // No ZDR endpoint. Cost: $0.08 an image at Recraft (GET /api/v1/images/models/recraft/recraft-v4-vector/endpoints, 25 Oct
+    // 2026). Held back on 25 Oct 2026 until the Image page took it (decision 204).
+    openRouterSlug: 'recraft/recraft-v4-vector',
+    cost: null,
+    price: null,
+    media: {
+      kind: 'image',
+      aspectRatio: '16:9',
+      aspectRatios: ['16:9', '1:1', '9:16', '4:3', '3:4'],
+      api: { name: 'images' },
+      costUsd: 0.08,
+    },
+    info: {
+      id: 'open/recraft-v4-vector',
+      name: 'Recraft V4 Vector',
+      maker: 'Recraft',
+      makerSlug: 'recraft',
+      kind: 'image',
+      lane: 'open',
+      privacy: 'open',
+      description: "Recraft's earlier V4 drawings as SVG files.",
+      contextTokens: 0,
+      reasoning: false,
+      vision: false,
+      available: true,
+      teeModelId: null,
+    },
+  },
+  {
+    // No ZDR endpoint. Cost: $0.30 an image at Recraft (GET /api/v1/images/models/recraft/recraft-v4-pro-vector/endpoints, 25 Oct
+    // 2026). Held back on 25 Oct 2026 until the Image page took it (decision 204).
+    openRouterSlug: 'recraft/recraft-v4-pro-vector',
+    cost: null,
+    price: null,
+    media: {
+      kind: 'image',
+      aspectRatio: '16:9',
+      aspectRatios: ['16:9', '1:1', '9:16', '4:3', '3:4'],
+      api: { name: 'images' },
+      costUsd: 0.3,
+    },
+    info: {
+      id: 'open/recraft-v4-pro-vector',
+      name: 'Recraft V4 Pro Vector',
+      maker: 'Recraft',
+      makerSlug: 'recraft',
+      kind: 'image',
+      lane: 'open',
+      privacy: 'open',
+      description: "Recraft's earlier V4 Pro drawings as SVG files, with more detail.",
+      contextTokens: 0,
+      reasoning: false,
+      vision: false,
+      available: true,
+      teeModelId: null,
+    },
+  },
+  {
+    // No ZDR endpoint. Cost: $0.007 an image at Recraft (GET /api/v1/images/models/recraft/recraft-v4.1-flash/endpoints, 25 Oct
+    // 2026). Held back on 25 Oct 2026 until the Image page took it (decision 204).
+    openRouterSlug: 'recraft/recraft-v4.1-flash',
+    cost: null,
+    price: null,
+    media: {
+      kind: 'image',
+      aspectRatio: '16:9',
+      aspectRatios: ['16:9', '1:1', '9:16', '4:3', '3:4'],
+      api: { name: 'images' },
+      costUsd: 0.007,
+    },
+    info: {
+      id: 'open/recraft-v4.1-flash',
+      name: 'Recraft V4.1 Flash',
+      maker: 'Recraft',
+      makerSlug: 'recraft',
+      kind: 'image',
+      lane: 'open',
+      privacy: 'open',
+      description: "Recraft's fastest V4.1 model, from a prompt alone.",
+      contextTokens: 0,
+      reasoning: false,
+      vision: false,
+      available: true,
+      teeModelId: null,
+    },
+  },
+  {
     // No ZDR endpoint. Cost: $0.13 an image (one size) at Sourceful.
     openRouterSlug: 'sourceful/riverflow-v2.5-pro',
     cost: null,
@@ -3857,7 +4236,7 @@ export const MODEL_CATALOG: readonly CatalogModel[] = [
     media: {
       kind: 'image',
       aspectRatio: '16:9',
-      aspectRatios: ['16:9', '1:1', '9:16'],
+      aspectRatios: ['16:9', '1:1', '9:16', '21:9', '3:2', '4:3', '3:4', '2:3'],
       api: { name: 'images' },
       costUsd: 0.13,
     },
@@ -3885,7 +4264,7 @@ export const MODEL_CATALOG: readonly CatalogModel[] = [
     media: {
       kind: 'image',
       aspectRatio: '16:9',
-      aspectRatios: ['16:9', '1:1', '9:16'],
+      aspectRatios: ['16:9', '1:1', '9:16', '21:9', '3:2', '4:3', '3:4', '2:3'],
       api: { name: 'images' },
       costUsd: 0.019,
     },
@@ -3913,7 +4292,7 @@ export const MODEL_CATALOG: readonly CatalogModel[] = [
     media: {
       kind: 'image',
       aspectRatio: '16:9',
-      aspectRatios: ['16:9', '1:1', '9:16'],
+      aspectRatios: ['16:9', '1:1', '9:16', '21:9', '3:2', '4:3', '3:4', '2:3'],
       api: { name: 'images' },
       costUsd: 0.15,
     },
@@ -3941,7 +4320,7 @@ export const MODEL_CATALOG: readonly CatalogModel[] = [
     media: {
       kind: 'image',
       aspectRatio: '16:9',
-      aspectRatios: ['16:9', '1:1', '9:16'],
+      aspectRatios: ['16:9', '1:1', '9:16', '21:9', '3:2', '4:3', '3:4', '2:3'],
       api: { name: 'images' },
       costUsd: 0.02,
     },
@@ -3970,7 +4349,7 @@ export const MODEL_CATALOG: readonly CatalogModel[] = [
     media: {
       kind: 'image',
       aspectRatio: '16:9',
-      aspectRatios: ['16:9', '1:1', '9:16'],
+      aspectRatios: ['16:9', '1:1', '9:16', '2:1', '3:2', '4:3', '5:4', '4:5', '3:4', '2:3', '1:2'],
       api: { name: 'images' },
       costUsd: 0.01,
     },
@@ -4760,6 +5139,459 @@ export const MODEL_CATALOG: readonly CatalogModel[] = [
       lane: 'open',
       privacy: 'open',
       description: "HeyGen's general video model for short clips.",
+      contextTokens: 0,
+      reasoning: false,
+      vision: false,
+      available: true,
+      teeModelId: null,
+    },
+  },
+  // Audio (the owner, 26 Oct 2026): music, then voices, then sound.
+  {
+    // Music: $0.08 a song of up to about three minutes (a song of 3:03 took 40 s, 26 Oct 2026).
+    openRouterSlug: 'google/lyria-3-pro-preview',
+    cost: null,
+    price: null,
+    media: {
+      kind: 'audio',
+      mode: 'music',
+      api: 'chat',
+      rate: { per: 'piece', usd: 0.08 },
+      costUsd: 0.08,
+    },
+    info: {
+      id: 'open/lyria-3-pro',
+      name: 'Lyria 3 Pro',
+      maker: 'Google',
+      makerSlug: 'google',
+      kind: 'audio',
+      lane: 'open',
+      privacy: 'open',
+      description: "Google's music model for full songs, with vocals or instrumental.",
+      contextTokens: 0,
+      reasoning: false,
+      vision: false,
+      available: true,
+      teeModelId: null,
+    },
+  },
+  {
+    // Music: $0.04 a clip of 30 seconds.
+    openRouterSlug: 'google/lyria-3-clip-preview',
+    cost: null,
+    price: null,
+    media: {
+      kind: 'audio',
+      mode: 'music',
+      api: 'chat',
+      rate: { per: 'piece', usd: 0.04 },
+      costUsd: 0.04,
+    },
+    info: {
+      id: 'open/lyria-3-clip',
+      name: 'Lyria 3 Clip',
+      maker: 'Google',
+      makerSlug: 'google',
+      kind: 'audio',
+      lane: 'open',
+      privacy: 'open',
+      description: "Google's music model for clips of 30 seconds.",
+      contextTokens: 0,
+      reasoning: false,
+      vision: false,
+      available: true,
+      teeModelId: null,
+    },
+  },
+  {
+    // Voice: $80 a million characters; a text of 1,000, $0.08.
+    openRouterSlug: 'elevenlabs/eleven-v4',
+    cost: null,
+    price: null,
+    media: {
+      kind: 'audio',
+      mode: 'voice',
+      api: 'speech',
+      rate: { per: 'character', usd: 0.00008 },
+      costUsd: 0.08,
+    },
+    info: {
+      id: 'open/eleven-v4',
+      name: 'Eleven v4',
+      maker: 'ElevenLabs',
+      makerSlug: 'elevenlabs',
+      kind: 'audio',
+      lane: 'open',
+      privacy: 'open-no-retention',
+      description: "ElevenLabs' most expressive voice model, with tags for emotion and delivery.",
+      contextTokens: 0,
+      reasoning: false,
+      vision: false,
+      available: true,
+      teeModelId: null,
+    },
+  },
+  {
+    // Voice: $40 a million characters; a text of 1,000, $0.04.
+    openRouterSlug: 'elevenlabs/eleven-v4-turbo',
+    cost: null,
+    price: null,
+    media: {
+      kind: 'audio',
+      mode: 'voice',
+      api: 'speech',
+      rate: { per: 'character', usd: 0.00004 },
+      costUsd: 0.04,
+    },
+    info: {
+      id: 'open/eleven-v4-turbo',
+      name: 'Eleven v4 Turbo',
+      maker: 'ElevenLabs',
+      makerSlug: 'elevenlabs',
+      kind: 'audio',
+      lane: 'open',
+      privacy: 'open-no-retention',
+      description: 'The faster version of Eleven v4, with the same voices and tags.',
+      contextTokens: 0,
+      reasoning: false,
+      vision: false,
+      available: true,
+      teeModelId: null,
+    },
+  },
+  {
+    // Voice: $9 a million audio tokens, 25 a second, so $0.000225 a second; a text of 1,000
+    // characters reads in about 67 seconds, $0.015. Its text tokens add under 1%.
+    openRouterSlug: 'google/gemini-3.8-flash-tts',
+    cost: null,
+    price: null,
+    media: {
+      kind: 'audio',
+      mode: 'voice',
+      api: 'speech',
+      rate: { per: 'second', usd: 0.000225 },
+      costUsd: 0.015,
+    },
+    info: {
+      id: 'open/gemini-3.8-flash-tts',
+      name: 'Gemini 3.8 Flash TTS',
+      maker: 'Google',
+      makerSlug: 'google',
+      kind: 'audio',
+      lane: 'open',
+      privacy: 'open-no-retention',
+      description: "Google's creative voice model, with 30 voices.",
+      contextTokens: 0,
+      reasoning: false,
+      vision: false,
+      available: true,
+      teeModelId: null,
+    },
+  },
+  {
+    // Voice: $6 a million audio tokens, 25 a second, so $0.00015 a second; about $0.01 for a
+    // text of 1,000 characters.
+    openRouterSlug: 'google/gemini-3.8-flash-lite-tts',
+    cost: null,
+    price: null,
+    media: {
+      kind: 'audio',
+      mode: 'voice',
+      api: 'speech',
+      rate: { per: 'second', usd: 0.00015 },
+      costUsd: 0.01,
+    },
+    info: {
+      id: 'open/gemini-3.8-flash-lite-tts',
+      name: 'Gemini 3.8 Flash Lite TTS',
+      maker: 'Google',
+      makerSlug: 'google',
+      kind: 'audio',
+      lane: 'open',
+      privacy: 'open-no-retention',
+      description: 'The fast, lower-cost member of the Gemini 3.8 voice family.',
+      contextTokens: 0,
+      reasoning: false,
+      vision: false,
+      available: true,
+      teeModelId: null,
+    },
+  },
+  {
+    // Voice: $22 a million characters; a text of 1,000, $0.022.
+    openRouterSlug: 'microsoft/mai-voice-2.1',
+    cost: null,
+    price: null,
+    media: {
+      kind: 'audio',
+      mode: 'voice',
+      api: 'speech',
+      rate: { per: 'character', usd: 0.000022 },
+      costUsd: 0.022,
+    },
+    info: {
+      id: 'open/mai-voice-2.1',
+      name: 'MAI-Voice 2.1',
+      maker: 'Microsoft AI',
+      makerSlug: 'microsoft',
+      kind: 'audio',
+      lane: 'open',
+      privacy: 'open-no-retention',
+      description: "Microsoft AI's most natural voice model, with studio-grade speech.",
+      contextTokens: 0,
+      reasoning: false,
+      vision: false,
+      available: true,
+      teeModelId: null,
+    },
+  },
+  {
+    // Voice: $15 a million characters; a text of 1,000, $0.015.
+    openRouterSlug: 'microsoft/mai-voice-2.1-flash',
+    cost: null,
+    price: null,
+    media: {
+      kind: 'audio',
+      mode: 'voice',
+      api: 'speech',
+      rate: { per: 'character', usd: 0.000015 },
+      costUsd: 0.015,
+    },
+    info: {
+      id: 'open/mai-voice-2.1-flash',
+      name: 'MAI-Voice 2.1 Flash',
+      maker: 'Microsoft AI',
+      makerSlug: 'microsoft',
+      kind: 'audio',
+      lane: 'open',
+      privacy: 'open-no-retention',
+      description: 'The quick version of MAI-Voice 2.1.',
+      contextTokens: 0,
+      reasoning: false,
+      vision: false,
+      available: true,
+      teeModelId: null,
+    },
+  },
+  {
+    // Voice: $15 a million characters; a text of 1,000, $0.015. It reads with a voice of its own.
+    openRouterSlug: 'fish-audio/s2.1-pro',
+    cost: null,
+    price: null,
+    media: {
+      kind: 'audio',
+      mode: 'voice',
+      api: 'speech',
+      rate: { per: 'character', usd: 0.000015 },
+      costUsd: 0.015,
+    },
+    info: {
+      id: 'open/fish-audio-s2.1-pro',
+      name: 'S2.1 Pro',
+      maker: 'Fish Audio',
+      makerSlug: 'fishaudio',
+      kind: 'audio',
+      lane: 'open',
+      privacy: 'open-no-retention',
+      description:
+        "Fish Audio's voice model for narration and dialogue, steered by notes in brackets.",
+      contextTokens: 0,
+      reasoning: false,
+      vision: false,
+      available: true,
+      teeModelId: null,
+    },
+  },
+  {
+    // Voice: $2 a million characters; a text of 1,000, $0.002. It reads with a voice of its own.
+    openRouterSlug: 'fish-audio/drama-3',
+    cost: null,
+    price: null,
+    media: {
+      kind: 'audio',
+      mode: 'voice',
+      api: 'speech',
+      rate: { per: 'character', usd: 0.000002 },
+      costUsd: 0.002,
+    },
+    info: {
+      id: 'open/fish-audio-drama-3',
+      name: 'Drama 3',
+      maker: 'Fish Audio',
+      makerSlug: 'fishaudio',
+      kind: 'audio',
+      lane: 'open',
+      privacy: 'open-no-retention',
+      description:
+        "Fish Audio's model for acted lines: write the direction in brackets before a line.",
+      contextTokens: 0,
+      reasoning: false,
+      vision: false,
+      available: true,
+      teeModelId: null,
+    },
+  },
+  {
+    // Voice: $100 a million characters; a text of 1,000, $0.10. No ZDR endpoint.
+    openRouterSlug: 'minimax/speech-2.8-hd',
+    cost: null,
+    price: null,
+    media: {
+      kind: 'audio',
+      mode: 'voice',
+      api: 'speech',
+      rate: { per: 'character', usd: 0.0001 },
+      costUsd: 0.1,
+    },
+    info: {
+      id: 'open/minimax-speech-2.8-hd',
+      name: 'Speech 2.8 HD',
+      maker: 'MiniMax',
+      makerSlug: 'minimax',
+      kind: 'audio',
+      lane: 'open',
+      privacy: 'open',
+      description: "MiniMax's voice model at its highest quality.",
+      contextTokens: 0,
+      reasoning: false,
+      vision: false,
+      available: true,
+      teeModelId: null,
+    },
+  },
+  {
+    // Voice: $60 a million characters; a text of 1,000, $0.06. No ZDR endpoint.
+    openRouterSlug: 'minimax/speech-2.8-turbo',
+    cost: null,
+    price: null,
+    media: {
+      kind: 'audio',
+      mode: 'voice',
+      api: 'speech',
+      rate: { per: 'character', usd: 0.00006 },
+      costUsd: 0.06,
+    },
+    info: {
+      id: 'open/minimax-speech-2.8-turbo',
+      name: 'Speech 2.8 Turbo',
+      maker: 'MiniMax',
+      makerSlug: 'minimax',
+      kind: 'audio',
+      lane: 'open',
+      privacy: 'open',
+      description: 'The faster version of Speech 2.8 HD.',
+      contextTokens: 0,
+      reasoning: false,
+      vision: false,
+      available: true,
+      teeModelId: null,
+    },
+  },
+  {
+    // Voice: $15 a million characters; a text of 1,000, $0.015. No ZDR endpoint.
+    openRouterSlug: 'x-ai/grok-voice-tts-1.0',
+    cost: null,
+    price: null,
+    media: {
+      kind: 'audio',
+      mode: 'voice',
+      api: 'speech',
+      rate: { per: 'character', usd: 0.000015 },
+      costUsd: 0.015,
+    },
+    info: {
+      id: 'open/grok-voice-tts-1.0',
+      name: 'Grok Voice TTS 1.0',
+      maker: 'SpaceXAI',
+      makerSlug: 'xai',
+      kind: 'audio',
+      lane: 'open',
+      privacy: 'open',
+      description: "SpaceXAI's voice model, with five voices.",
+      contextTokens: 0,
+      reasoning: false,
+      vision: false,
+      available: true,
+      teeModelId: null,
+    },
+  },
+  {
+    // Voice: $13 a million characters; a text of 1,000, $0.013.
+    openRouterSlug: 'mistralai/voxtral-mini-tts-3-0',
+    cost: null,
+    price: null,
+    media: {
+      kind: 'audio',
+      mode: 'voice',
+      api: 'speech',
+      rate: { per: 'character', usd: 0.000013 },
+      costUsd: 0.013,
+    },
+    info: {
+      id: 'open/voxtral-mini-tts-3.0',
+      name: 'Voxtral TTS 3',
+      maker: 'Mistral AI',
+      makerSlug: 'mistral',
+      kind: 'audio',
+      lane: 'open',
+      privacy: 'open-no-retention',
+      description: "Mistral AI's voice model, with voices for each mood.",
+      contextTokens: 0,
+      reasoning: false,
+      vision: false,
+      available: true,
+      teeModelId: null,
+    },
+  },
+  {
+    // Voice: $0.62 a million characters; a text of 1,000, under a tenth of a cent.
+    openRouterSlug: 'hexgrad/kokoro-82m',
+    cost: null,
+    price: null,
+    media: {
+      kind: 'audio',
+      mode: 'voice',
+      api: 'speech',
+      rate: { per: 'character', usd: 0.00000062 },
+      costUsd: 0.00062,
+    },
+    info: {
+      id: 'open/kokoro-82m',
+      name: 'Kokoro 82M',
+      maker: 'hexgrad',
+      makerSlug: 'hexgrad',
+      kind: 'audio',
+      lane: 'open',
+      privacy: 'open-no-retention',
+      description: 'A light open-weight voice model, at a fraction of a cent.',
+      contextTokens: 0,
+      reasoning: false,
+      vision: false,
+      available: true,
+      teeModelId: null,
+    },
+  },
+  {
+    // Sound: $0.0025 a second of audio, up to 120; about ten seconds, $0.025.
+    openRouterSlug: 'bytedance-seed/seed-audio-1-0',
+    cost: null,
+    price: null,
+    media: {
+      kind: 'audio',
+      mode: 'sound',
+      api: 'speech',
+      rate: { per: 'second', usd: 0.0025 },
+      costUsd: 0.025,
+    },
+    info: {
+      id: 'open/seed-audio-1.0',
+      name: 'Seed Audio 1.0',
+      maker: 'ByteDance Seed',
+      makerSlug: 'bytedance',
+      kind: 'audio',
+      lane: 'open',
+      privacy: 'open-no-retention',
+      description: "ByteDance Seed's model for sound effects and ambience from a description.",
       contextTokens: 0,
       reasoning: false,
       vision: false,

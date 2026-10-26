@@ -6,11 +6,13 @@ import { OPENROUTER } from '../config/openrouter.js';
 import { ProxyError, upstreamStatusError } from '../lib/errors.js';
 import type { UpstreamDeps } from '../openrouter/stream.js';
 
-/** The prompt of an image or a video, and the photo that the user gave with it (23 Oct 2026). */
+/** The prompt of a video, and the frames that the user gave with it (23 and 25 Oct 2026). */
 export interface MediaPrompt {
   readonly text: string;
-  /** A data URL: the image to change, or the first frame of a video. */
+  /** A data URL: the first frame. */
   readonly image: string | null;
+  /** A data URL: the last frame, which needs a first one. */
+  readonly lastImage: string | null;
 }
 
 export interface MediaCall<T> {

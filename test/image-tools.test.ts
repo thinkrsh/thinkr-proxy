@@ -106,6 +106,15 @@ describe('the image tools of the catalog', () => {
     ]);
   });
 
+  it('finds style images on a model that draws from the prompt alone', () => {
+    const image = findModel(SIZED);
+    if (image?.media?.kind !== 'image') throw new Error(`${SIZED} is no image model.`);
+    const tools: ImageTools = { ...findImageTools(SIZED), stylePhotos: true };
+    expect(imageToolsProblems([image], { [SIZED]: tools })).toEqual([
+      `${SIZED}: style images need at least one photo`,
+    ]);
+  });
+
   it('lists the tools of an image model with each price at what the user pays', async () => {
     const response = await createTestApp().app.request('/api/models?kinds=image,video');
     const { models } = (await response.json()) as ModelsResponse;
@@ -118,6 +127,7 @@ describe('the image tools of the catalog', () => {
       defaultSize: '1K',
       minPhotos: 0,
       maxPhotos: tools.maxPhotos,
+      stylePhotos: false,
       photoPriceUsd: 0,
       seed: false,
       transparent: false,

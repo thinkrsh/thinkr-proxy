@@ -183,6 +183,7 @@ function toolsInfo(tools: ImageTools): ImageToolsInfo {
     defaultSize: tools.defaultSize,
     minPhotos: tools.minPhotos,
     maxPhotos: tools.maxPhotos,
+    stylePhotos: tools.stylePhotos,
     photoPriceUsd: mediaPriceUsd({ costUsd: tools.photoCostUsd }),
     seed: tools.seed,
     transparent: tools.transparent,
@@ -386,6 +387,9 @@ function toolProblems(id: string, media: ImageSettings, tools: ImageTools | unde
   const problems: string[] = [];
   if (tools.minPhotos < 0 || tools.minPhotos > tools.maxPhotos || tools.maxPhotos > PHOTO_LIMIT) {
     problems.push(`${id}: its photos must run from 0 to ${String(PHOTO_LIMIT)}, the fewest first`);
+  }
+  if (tools.stylePhotos && tools.minPhotos === 0) {
+    problems.push(`${id}: style images need at least one photo`);
   }
   if (tools.transparentFormat !== null && !tools.transparent) {
     problems.push(`${id}: a format for a transparent background needs one`);

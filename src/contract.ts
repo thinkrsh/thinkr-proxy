@@ -188,10 +188,12 @@ export interface ImageToolsInfo {
   sizes: SizeOption[];
   /** The size of a request that picks none; null when the model takes no size. */
   defaultSize: string | null;
-  /** The fewest photos of one request: one for a model that draws in the style of a photo. */
+  /** The fewest photos of one request: one for a model of style images or an editing model. */
   minPhotos: number;
   /** The most photos of one request: the image to change, or the images to combine. */
   maxPhotos: number;
+  /** The photos set the style of the image, as with the styles of Recraft (28 Oct 2026). */
+  stylePhotos: boolean;
   /** What each photo adds, about, at the price that the user pays. */
   photoPriceUsd: number;
   seed: boolean;

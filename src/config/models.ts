@@ -4403,6 +4403,38 @@ export const MODEL_CATALOG: readonly CatalogModel[] = [
       teeModelId: null,
     },
   },
+  {
+    // A ZDR endpoint, but only the Images API, which takes no data policy, so Open. Cost: $0.06 an
+    // image at 2K, the size of the provider, and at least one photo (GET
+    // /api/v1/images/models/krea/k3-edit/endpoints and three test edits, 28 Oct 2026; the sizes and
+    // the photo in config/imageTools.ts). Venice serves no K3 Edit. Added once OpenRouter priced it
+    // (decision 214).
+    openRouterSlug: 'krea/k3-edit',
+    cost: null,
+    price: null,
+    media: {
+      kind: 'image',
+      aspectRatio: '16:9',
+      aspectRatios: ['16:9', '1:1', '9:16', '3:2', '4:3', '4:5', '2:3'],
+      api: { name: 'images' },
+      costUsd: 0.06,
+    },
+    info: {
+      id: 'open/k3-edit',
+      name: 'K3 Edit',
+      maker: 'Krea',
+      makerSlug: 'krea',
+      kind: 'image',
+      lane: 'open',
+      privacy: 'open',
+      description: "Krea's editing model: changes an image from a prompt and keeps the rest.",
+      contextTokens: 0,
+      reasoning: false,
+      vision: false,
+      available: true,
+      teeModelId: null,
+    },
+  },
   // Video, at the level Open only: OpenRouter routes no video job under zero data retention.
   {
     // Cost: $0.40 a second with sound, 4 seconds, $1.60.

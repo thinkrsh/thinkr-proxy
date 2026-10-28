@@ -2,7 +2,7 @@
 // issuer of vouchers, which the dashboard calls, has its own (apps/issuer/src/contract.ts).
 import { z } from 'zod';
 
-import { CREDIT, VOUCHER_SIGNATURE } from './config/credit.js';
+import { CREDIT, NOTE_SIGNATURE } from './config/credit.js';
 import { PHOTO_LIMIT } from './config/imageTools.js';
 import { SOURCE_NAME_CHARS } from './config/sourcedTools.js';
 import { LIMITS } from './config/limits.js';
@@ -304,11 +304,11 @@ function base64UrlOf(bytes: number): z.ZodString {
     .regex(/^[A-Za-z0-9_-]+$/);
 }
 
-const MODULUS_BYTES = VOUCHER_SIGNATURE.modulusBits / 8;
+const MODULUS_BYTES = NOTE_SIGNATURE.modulusBits / 8;
 
 const keyIdSchema = z
   .string()
-  .regex(new RegExp(`^[0-9a-f]{${String(VOUCHER_SIGNATURE.keyIdBytes * 2)}}$`));
+  .regex(new RegExp(`^[0-9a-f]{${String(NOTE_SIGNATURE.keyIdBytes * 2)}}$`));
 
 /** GET /api/credit/key: the public key that the app blinds its vouchers with. */
 export interface CreditKeyResponse {
@@ -335,7 +335,7 @@ export interface CreditKeyResponse {
 /** POST /api/credit/redeem: one voucher, spent into a balance. */
 export const redeemRequestSchema = z.strictObject({
   keyId: keyIdSchema,
-  nonce: base64UrlOf(VOUCHER_SIGNATURE.nonceBytes),
+  nonce: base64UrlOf(NOTE_SIGNATURE.nonceBytes),
   signature: base64UrlOf(MODULUS_BYTES),
   /**
    * The secret of the balance to fill, made by the app: a new random secret opens a new balance.

@@ -24,7 +24,7 @@ export async function balanceHash(secret: string): Promise<string> {
   return toBase64Url(await sha256(fromBase64Url(secret)));
 }
 
-export async function voucherHash(nonce: Uint8Array): Promise<string> {
+export async function noteHash(nonce: Uint8Array): Promise<string> {
   return toBase64Url(await sha256(nonce));
 }
 

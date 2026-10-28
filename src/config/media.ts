@@ -19,7 +19,7 @@ export const MEDIA = {
   ticket: {
     /**
      * Bytes of the secret that seals the tickets (AES-GCM, 256 bits), in TICKET_KEY_FILE. Until
-     * 24 Oct 2026 it came from the voucher key; the file holds the same secret, so tickets sealed
+     * 24 Oct 2026 it came from the note key; the file holds the same secret, so tickets sealed
      * before stay valid.
      */
     keyBytes: 32,

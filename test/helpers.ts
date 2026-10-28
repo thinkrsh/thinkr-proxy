@@ -11,7 +11,7 @@ import {
 import { vi } from 'vitest';
 
 import { createApp } from '../src/app.js';
-import { CREDIT, VOUCHER_SIGNATURE } from '../src/config/credit.js';
+import { CREDIT, NOTE_SIGNATURE } from '../src/config/credit.js';
 import { MEDIA } from '../src/config/media.js';
 import type { AccessMode, ChatEvent, ChatRequest } from '../src/contract.js';
 import { balanceHash, newBalanceSecret, usdToMicros } from '../src/credit/balance.js';
@@ -21,8 +21,8 @@ import type { SyncStore } from '../src/sync/store.js';
 import { readSseData } from '../src/lib/sse.js';
 import { openLedger } from '../src/node/ledger.js';
 import { openSyncStore } from '../src/node/sync-store.js';
-import { voucherKeysOf, type VoucherKey } from '../src/credit/voucher-key.js';
-import { voucherKeyFromPublicPem } from '../src/node/voucher-key.js';
+import { noteKeysOf, type NoteKey } from '../src/credit/note-key.js';
+import { noteKeyFromPublicPem } from '../src/node/note-key.js';
 
 export const TEST_API_KEY = 'test-key';
 export const TEST_TINFOIL_KEY = 'test-tinfoil-key';
@@ -32,12 +32,12 @@ export const TEST_CLIENT = 'client-1';
 const PRIVATE_KEYS = new Map<string, KeyObject>();
 
 /**
- * A key pair of vouchers for all the tests of a file, since making an RSA key takes a moment. The
+ * A key pair of notes for all the tests of a file, since making an RSA key takes a moment. The
  * proxy gets its public key, as from the issuer; the tests sign with its private key.
  */
-function testKey(): VoucherKey {
-  const pair = generateKeyPairSync('rsa', { modulusLength: VOUCHER_SIGNATURE.modulusBits });
-  const key = voucherKeyFromPublicPem(
+function testKey(): NoteKey {
+  const pair = generateKeyPairSync('rsa', { modulusLength: NOTE_SIGNATURE.modulusBits });
+  const key = noteKeyFromPublicPem(
     pair.publicKey.export({ type: 'spki', format: 'pem' }) as string,
   );
   PRIVATE_KEYS.set(key.keyId, pair.privateKey);
@@ -45,16 +45,16 @@ function testKey(): VoucherKey {
 }
 
 /** The key of top-ups, and the holder key of October 2026. */
-export const TEST_VOUCHER_KEY = testKey();
+export const TEST_NOTE_KEY = testKey();
 export const TEST_HOLDER_MONTH = '2026-10';
 export const TEST_HOLDER_KEY = testKey();
-export const TEST_VOUCHER_KEYS = voucherKeysOf(
-  TEST_VOUCHER_KEY,
+export const TEST_NOTE_KEYS = noteKeysOf(
+  TEST_NOTE_KEY,
   new Map([[TEST_HOLDER_MONTH, TEST_HOLDER_KEY]]),
 );
 
-/** Signs one blinded voucher with a key, as the issuer does (apps/issuer/src/node/voucher-key.ts). */
-export function issuerBlindSign(key: VoucherKey, blinded: Uint8Array): Uint8Array {
+/** Signs one blinded note with a key, as the issuer does (apps/issuer/src/node/note-key.ts). */
+export function issuerBlindSign(key: NoteKey, blinded: Uint8Array): Uint8Array {
   const privateKey = PRIVATE_KEYS.get(key.keyId);
   if (privateKey === undefined) throw new Error('The tests hold no private key of this key.');
   return new Uint8Array(
@@ -65,7 +65,7 @@ export function issuerBlindSign(key: VoucherKey, blinded: Uint8Array): Uint8Arra
 /** The secret that seals the tickets of video jobs in the tests. */
 export const TEST_TICKET_KEY = new Uint8Array(randomBytes(MEDIA.ticket.keyBytes));
 
-/** A balance with this much credit, as if a voucher had opened it. Returns its secret. */
+/** A balance with this much credit, as if a note had opened it. Returns its secret. */
 export async function fundedBalance(ledger: Ledger, usd: number): Promise<string> {
   const secret = newBalanceSecret();
   ledger.redeem(randomUUID(), await balanceHash(secret), usdToMicros(usd), null);
@@ -166,14 +166,14 @@ export function createTestApp(
       tinfoilApiKey: TEST_TINFOIL_KEY,
       accessMode: options.accessMode ?? 'full',
       clientAddressHeader: null,
-      voucherPublicKeyFile: 'unused-in-tests.pem',
+      notePublicKeyFile: 'unused-in-tests.pem',
       holderPublicKeysFile: 'unused-in-tests.json',
       ticketKeyFile: 'unused-in-tests.txt',
       databaseFile: ':memory:',
       publicOrigin: options.publicOrigin === undefined ? TEST_PUBLIC_ORIGIN : options.publicOrigin,
     },
     ledger,
-    voucherKeys: TEST_VOUCHER_KEYS,
+    noteKeys: TEST_NOTE_KEYS,
     ticketKey: TEST_TICKET_KEY,
     syncStore,
     fetch: fetchMock,

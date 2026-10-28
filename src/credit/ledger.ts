@@ -1,9 +1,9 @@
-// What the proxy must remember for credit: the vouchers spent, the balances, and the video jobs
+// What the proxy must remember for credit: the notes spent, the balances, and the video jobs
 // settled. It holds hashes only, and no address, no wallet, and no time of a chat, so that a
 // payment does not link to a chat (decision 37). The payments live in the issuer (apps/issuer/),
-// which never sees a voucher. The Node entry keeps it in SQLite (node/ledger.ts).
+// which never sees a note. The Node entry keeps it in SQLite (node/ledger.ts).
 //
-// Holder vouchers (decisions 189 and 191) fill a balance like any voucher. The ledger also keeps
+// Holder vouchers (decisions 189 and 191) fill a balance like any note. The ledger also keeps
 // how much of each balance came from them, spends that part first, and counts, by month, the
 // holder vouchers spent into balances and what their credit paid for, with no balance in the
 // totals.
@@ -30,12 +30,12 @@ export type MergeResult = 'ok' | 'unknown';
 
 export interface Ledger {
   /**
-   * Spends a voucher into a balance in one step, and opens the balance when it is new. Nothing
+   * Spends a note into a balance in one step, and opens the balance when it is new. Nothing
    * changes unless both parts succeed. `holderMonth` names the month of the key of a holder
-   * voucher, or is null for the voucher of a top-up.
+   * note, or is null for the note of a top-up.
    */
   redeem: (
-    voucherHash: string,
+    noteHash: string,
     balanceHash: string,
     micros: number,
     holderMonth: string | null,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { CREDIT, MAX_TOP_UP_VOUCHERS } from '../src/config/credit.js';
+import { CREDIT, MAX_TOP_UP_NOTES } from '../src/config/credit.js';
 import { PAYMENT_WORDS } from '../src/config/payments.js';
 import type {
   AccessResponse,
@@ -16,12 +16,12 @@ import {
   issuerBlindSign,
   TEST_HOLDER_KEY,
   TEST_HOLDER_MONTH,
-  TEST_VOUCHER_KEY,
+  TEST_NOTE_KEY,
   type TestApp,
 } from './helpers.js';
-import { blindVouchers, finalizeVoucher, redeemBody, signedVoucher } from './vouchers.js';
+import { blindNotes, finalizeNote, redeemBody, signedNote } from './notes.js';
 
-const KEY = TEST_VOUCHER_KEY;
+const KEY = TEST_NOTE_KEY;
 
 function redeem(app: TestApp['app'], body: string): Promise<Response> {
   return Promise.resolve(
@@ -44,16 +44,16 @@ async function creditOf(app: TestApp['app'], secret: string): Promise<AccessResp
 
 describe('the voucher key', () => {
   it('passes vouchers that the issuer signed blinded (RFC 9474)', async () => {
-    const vouchers = await blindVouchers(KEY, 3);
-    for (const voucher of vouchers) {
-      const blindSignature = issuerBlindSign(KEY, voucher.blinded);
-      const { nonce, signature } = await finalizeVoucher(KEY, voucher, blindSignature);
+    const notes = await blindNotes(KEY, 3);
+    for (const note of notes) {
+      const blindSignature = issuerBlindSign(KEY, note.blinded);
+      const { nonce, signature } = await finalizeNote(KEY, note, blindSignature);
       expect(KEY.verify(nonce, signature)).toBe(true);
     }
   });
 
   it('refuses a voucher whose message or signature changed', async () => {
-    const { nonce, signature } = await signedVoucher(KEY);
+    const { nonce, signature } = await signedNote(KEY);
     const otherNonce = nonce.slice();
     otherNonce[0] = (otherNonce[0] ?? 0) ^ 1;
     expect(KEY.verify(otherNonce, signature)).toBe(false);
@@ -63,14 +63,14 @@ describe('the voucher key', () => {
 
 describe('the packs of a top-up', () => {
   it('never cost more than the cap of one top-up (decision 95)', () => {
-    for (const vouchers of CREDIT.packs) {
-      expect(vouchers * CREDIT.voucherUsd).toBeLessThanOrEqual(CREDIT.maxTopUpUsd);
+    for (const notes of CREDIT.packs) {
+      expect(notes * CREDIT.voucherUsd).toBeLessThanOrEqual(CREDIT.maxTopUpUsd);
     }
   });
 
   it('let a typed amount buy up to the cap, in whole vouchers', () => {
-    expect(MAX_TOP_UP_VOUCHERS).toBe(200);
-    expect(MAX_TOP_UP_VOUCHERS * CREDIT.voucherUsd).toBe(CREDIT.maxTopUpUsd);
+    expect(MAX_TOP_UP_NOTES).toBe(200);
+    expect(MAX_TOP_UP_NOTES * CREDIT.voucherUsd).toBe(CREDIT.maxTopUpUsd);
   });
 });
 
@@ -82,7 +82,7 @@ describe('GET /api/credit/key', () => {
       keyId: KEY.keyId,
       voucherUsd: CREDIT.voucherUsd,
       packs: [...CREDIT.packs],
-      maxVouchers: MAX_TOP_UP_VOUCHERS,
+      maxVouchers: MAX_TOP_UP_NOTES,
       payment: { network: 'Robinhood Chain', token: 'USDG', tokens: ['USDG', 'THKR'] },
       holderKeys: [
         {
@@ -108,9 +108,9 @@ describe('POST /api/credit/redeem', () => {
   it('opens the balance that the app names, then adds a second voucher to it', async () => {
     const { app } = createTestApp();
     const secret = newBalanceSecret();
-    const first = await redeem(app, redeemBody(KEY, await signedVoucher(KEY), secret));
+    const first = await redeem(app, redeemBody(KEY, await signedNote(KEY), secret));
     expect((await first.json()) as RedeemResponse).toEqual({ usd: 1 });
-    const second = await redeem(app, redeemBody(KEY, await signedVoucher(KEY), secret));
+    const second = await redeem(app, redeemBody(KEY, await signedNote(KEY), secret));
     expect((await second.json()) as RedeemResponse).toEqual({ usd: 2 });
     expect(await creditOf(app, secret)).toEqual({ usd: 2 });
   });
@@ -118,9 +118,9 @@ describe('POST /api/credit/redeem', () => {
   it('spends a voucher once, and a lost answer loses no credit', async () => {
     const { app } = createTestApp();
     const secret = newBalanceSecret();
-    const voucher = await signedVoucher(KEY);
-    expect((await redeem(app, redeemBody(KEY, voucher, secret))).status).toBe(200);
-    const again = await redeem(app, redeemBody(KEY, voucher, newBalanceSecret()));
+    const note = await signedNote(KEY);
+    expect((await redeem(app, redeemBody(KEY, note, secret))).status).toBe(200);
+    const again = await redeem(app, redeemBody(KEY, note, newBalanceSecret()));
     expect(again.status).toBe(409);
     expect(await errorCode(again)).toBe('voucher_spent');
     expect(await creditOf(app, secret)).toEqual({ usd: 1 });
@@ -128,8 +128,8 @@ describe('POST /api/credit/redeem', () => {
 
   it('refuses a voucher that the key did not sign', async () => {
     const { app } = createTestApp();
-    const voucher = await signedVoucher(KEY);
-    const forged = { nonce: voucher.nonce, signature: voucher.signature.map((byte) => byte ^ 1) };
+    const note = await signedNote(KEY);
+    const forged = { nonce: note.nonce, signature: note.signature.map((byte) => byte ^ 1) };
     const response = await redeem(app, redeemBody(KEY, forged, newBalanceSecret()));
     expect(response.status).toBe(400);
     expect(await errorCode(response)).toBe('voucher_invalid');
@@ -137,7 +137,7 @@ describe('POST /api/credit/redeem', () => {
 
   it('asks for a new top-up when the key changed', async () => {
     const { app } = createTestApp();
-    const body = redeemBody(KEY, await signedVoucher(KEY), newBalanceSecret());
+    const body = redeemBody(KEY, await signedNote(KEY), newBalanceSecret());
     const changed = { ...(JSON.parse(body) as Record<string, string>), keyId: '0'.repeat(16) };
     const response = await redeem(app, JSON.stringify(changed));
     expect(response.status).toBe(409);

@@ -19,7 +19,7 @@ describe('readEnv', () => {
       tinfoilApiKey: 'tk-test',
       accessMode: 'full',
       clientAddressHeader: null,
-      voucherPublicKeyFile: '../../secret/voucher-dev-public.pem',
+      notePublicKeyFile: '../../secret/voucher-dev-public.pem',
       holderPublicKeysFile: '../../secret/holder-public-keys-dev.json',
       ticketKeyFile: '../../secret/ticket-key-dev.txt',
       databaseFile: '.data/ledger.db',

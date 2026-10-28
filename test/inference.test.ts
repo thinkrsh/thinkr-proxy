@@ -19,13 +19,13 @@ import {
   TEST_HOLDER_KEY,
   TEST_HOLDER_MONTH,
   TEST_TINFOIL_KEY,
-  TEST_VOUCHER_KEY,
+  TEST_NOTE_KEY,
   createTestApp,
   streamOf,
   upstreamCall,
   type TestApp,
 } from './helpers.js';
-import { signedVoucher } from './vouchers.js';
+import { signedNote } from './notes.js';
 
 const BASE = '/api/inference';
 const CHAT_ROUTE = `${BASE}${TINFOIL.chatCompletionsPath}`;
@@ -104,12 +104,12 @@ function chatMicros(): number {
   return usdToMicros(tokensUsd(USAGE, pricing));
 }
 
-async function voucherFields(key: typeof TEST_HOLDER_KEY) {
-  const voucher = await signedVoucher(key);
+async function noteFields(key: typeof TEST_HOLDER_KEY) {
+  const note = await signedNote(key);
   return {
     keyId: key.keyId,
-    nonce: toBase64Url(voucher.nonce),
-    signature: toBase64Url(voucher.signature),
+    nonce: toBase64Url(note.nonce),
+    signature: toBase64Url(note.signature),
   };
 }
 
@@ -219,15 +219,15 @@ describe('POST /api/inference/v1/keys/redeem', () => {
   it('fills a new key with holder vouchers, and skips them when sent again', async () => {
     const testApp = createTestApp();
     const key = `thkr_${newBalanceSecret()}`;
-    const vouchers = [await voucherFields(TEST_HOLDER_KEY), await voucherFields(TEST_HOLDER_KEY)];
-    const first = await redeem(testApp.app, { key, vouchers });
+    const notes = [await noteFields(TEST_HOLDER_KEY), await noteFields(TEST_HOLDER_KEY)];
+    const first = await redeem(testApp.app, { key, vouchers: notes });
     expect(first.status).toBe(200);
     const filled = (await first.json()) as KeyRedeemResponse;
     expect(filled.redeemed).toBe(2);
     expect(filled.spent).toBe(0);
     expect(filled.usd).toBeGreaterThan(0);
     const again = (await (
-      await redeem(testApp.app, { key, vouchers })
+      await redeem(testApp.app, { key, vouchers: notes })
     ).json()) as KeyRedeemResponse;
     expect(again).toEqual({ usd: filled.usd, redeemed: 0, spent: 2 });
   });
@@ -235,8 +235,8 @@ describe('POST /api/inference/v1/keys/redeem', () => {
   it('refuses the whole call when one voucher is of a top-up', async () => {
     const testApp = createTestApp();
     const key = `thkr_${newBalanceSecret()}`;
-    const vouchers = [await voucherFields(TEST_HOLDER_KEY), await voucherFields(TEST_VOUCHER_KEY)];
-    const response = await redeem(testApp.app, { key, vouchers });
+    const notes = [await noteFields(TEST_HOLDER_KEY), await noteFields(TEST_NOTE_KEY)];
+    const response = await redeem(testApp.app, { key, vouchers: notes });
     expect(response.status).toBe(400);
     expect(await errorOf(response)).toEqual({
       code: 'voucher_invalid',
@@ -247,8 +247,8 @@ describe('POST /api/inference/v1/keys/redeem', () => {
 
   it('refuses a voucher whose signature does not hold', async () => {
     const testApp = createTestApp();
-    const voucher = await voucherFields(TEST_HOLDER_KEY);
-    const forged = { ...voucher, nonce: (await voucherFields(TEST_HOLDER_KEY)).nonce };
+    const note = await noteFields(TEST_HOLDER_KEY);
+    const forged = { ...note, nonce: (await noteFields(TEST_HOLDER_KEY)).nonce };
     const response = await redeem(testApp.app, {
       key: `thkr_${newBalanceSecret()}`,
       vouchers: [forged],
@@ -261,7 +261,7 @@ describe('POST /api/inference/v1/keys/redeem', () => {
     const testApp = createTestApp();
     const response = await redeem(testApp.app, {
       key: newBalanceSecret(),
-      vouchers: [await voucherFields(TEST_HOLDER_KEY)],
+      vouchers: [await noteFields(TEST_HOLDER_KEY)],
     });
     expect(response.status).toBe(400);
     expect((await errorOf(response)).message).toBe(INFERENCE.messages.keyRequired);

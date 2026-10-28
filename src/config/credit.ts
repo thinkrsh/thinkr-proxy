@@ -1,10 +1,10 @@
-// Credit (decisions 48, 52, 64, and 132): blind vouchers of $1, a balance at the proxy that each
-// voucher fills, and each chat paid from the balance at the price of its model in config/models.ts,
-// or else at cost plus 25%. Change the numbers here only, except the worth of a voucher, the packs,
+// Credit (decisions 48, 52, 64, and 132): blind notes of $1, a balance at the proxy that each
+// note fills, and each chat paid from the balance at the price of its model in config/models.ts,
+// or else at cost plus 25%. Change the numbers here only, except the worth of a note, the packs,
 // and the cap of a top-up, which the issuer signs by (apps/issuer/src/config/credit.ts) and must
 // match there.
 export const CREDIT = {
-  /** The value of one voucher in USD (docs/CONCEPT.md, section "Blind vouchers"). */
+  /** The value of one note in USD (docs/CONCEPT.md, section "Blind vouchers"). */
   voucherUsd: 1,
   /**
    * What one holder voucher is worth when it fills a balance: $0.40 to start (decision 189). Must
@@ -13,7 +13,7 @@ export const CREDIT = {
   holderVoucherUsd: 0.4,
   /**
    * The quick choices of a top-up in the chat: $1, $5, or $20 (decision 64). A top-up may also buy
-   * any other whole number of vouchers up to the cap below (the owner, 23 Oct 2026: "bikin custom
+   * any other whole number of notes up to the cap below (the owner, 23 Oct 2026: "bikin custom
    * amount").
    */
   packs: [1, 5, 20],
@@ -68,16 +68,16 @@ export const CREDIT = {
   microsPerUsd: 1_000_000,
 } as const;
 
-/** The most vouchers that one top-up may buy: the cap of decision 95, in vouchers. */
-export const MAX_TOP_UP_VOUCHERS = Math.floor(CREDIT.maxTopUpUsd / CREDIT.voucherUsd);
+/** The most notes that one top-up may buy: the cap of decision 95, in notes. */
+export const MAX_TOP_UP_NOTES = Math.floor(CREDIT.maxTopUpUsd / CREDIT.voucherUsd);
 
-/** The blind RSA signature of the vouchers: RSABSSA-SHA384-PSS-Deterministic of RFC 9474. */
-export const VOUCHER_SIGNATURE = {
+/** The blind RSA signature of the notes: RSABSSA-SHA384-PSS-Deterministic of RFC 9474. */
+export const NOTE_SIGNATURE = {
   modulusBits: 2048,
   hash: 'sha384',
   /** The salt of RSA-PSS: the length of a SHA-384 digest. */
   saltBytes: 48,
-  /** Bytes of the random message of each voucher, made on the device of the user. */
+  /** Bytes of the random message of each note, made on the device of the user. */
   nonceBytes: 32,
   /** Bytes of the SHA-256 of the public key that name the key. */
   keyIdBytes: 8,

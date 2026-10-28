@@ -14,8 +14,8 @@ const envSchema = z.object({
    */
   CLIENT_ADDRESS_HEADER: z.string().trim().min(1).optional(),
   /**
-   * The public key of the vouchers (RSA, PEM), which the issuer (apps/issuer/) signs with its
-   * private key. The proxy holds no key that signs a voucher.
+   * The public key of the notes (RSA, PEM), which the issuer (apps/issuer/) signs with its
+   * private key. The proxy holds no key that signs a note.
    */
   VOUCHER_PUBLIC_KEY_FILE: z.string().trim().min(1),
   /**
@@ -25,7 +25,7 @@ const envSchema = z.object({
   HOLDER_PUBLIC_KEYS_FILE: z.string().trim().min(1),
   /** The secret that seals the tickets of video jobs: 32 bytes in base64url, on one line. */
   TICKET_KEY_FILE: z.string().trim().min(1),
-  /** The SQLite file of the ledger: vouchers spent, balances, and video jobs settled. */
+  /** The SQLite file of the ledger: notes spent, balances, and video jobs settled. */
   DATABASE_FILE: z.string().trim().min(1),
   /**
    * The public HTTPS address of the proxy, such as https://chat.thinkr.sh, where a provider fetches
@@ -44,7 +44,7 @@ export interface Env {
   readonly tinfoilApiKey: string;
   readonly accessMode: AccessMode;
   readonly clientAddressHeader: string | null;
-  readonly voucherPublicKeyFile: string;
+  readonly notePublicKeyFile: string;
   readonly holderPublicKeysFile: string;
   readonly ticketKeyFile: string;
   readonly databaseFile: string;
@@ -71,7 +71,7 @@ export function readEnv(source: EnvSource): Env {
     tinfoilApiKey: result.data.TINFOIL_API_KEY,
     accessMode: result.data.ACCESS_MODE,
     clientAddressHeader: result.data.CLIENT_ADDRESS_HEADER ?? null,
-    voucherPublicKeyFile: result.data.VOUCHER_PUBLIC_KEY_FILE,
+    notePublicKeyFile: result.data.VOUCHER_PUBLIC_KEY_FILE,
     holderPublicKeysFile: result.data.HOLDER_PUBLIC_KEYS_FILE,
     ticketKeyFile: result.data.TICKET_KEY_FILE,
     databaseFile: result.data.DATABASE_FILE,

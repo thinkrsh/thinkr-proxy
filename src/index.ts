@@ -19,12 +19,12 @@ import { writeLogLine } from './lib/log.js';
 import { nodeForward } from './node/forward.js';
 import { openLedger } from './node/ledger.js';
 import { openSyncStore } from './node/sync-store.js';
-import { voucherKeysOf } from './credit/voucher-key.js';
-import { holderKeysFromJson, voucherKeyFromPublicPem } from './node/voucher-key.js';
+import { noteKeysOf } from './credit/note-key.js';
+import { holderKeysFromJson, noteKeyFromPublicPem } from './node/note-key.js';
 
 const env = readEnv(process.env);
-const voucherKeys = voucherKeysOf(
-  voucherKeyFromPublicPem(readFileSync(env.voucherPublicKeyFile, 'utf8')),
+const noteKeys = noteKeysOf(
+  noteKeyFromPublicPem(readFileSync(env.notePublicKeyFile, 'utf8')),
   holderKeysFromJson(readFileSync(env.holderPublicKeysFile, 'utf8')),
 );
 const ticketKey = readTicketKey(env.ticketKeyFile);
@@ -71,7 +71,7 @@ const app = createApp({
   clientKey: visitorKey,
   log: writeLogLine,
   ledger,
-  voucherKeys,
+  noteKeys,
   ticketKey,
   syncStore,
 });
@@ -79,7 +79,7 @@ const app = createApp({
 const server = serve({ fetch: app.fetch, hostname: SERVER.host, port: SERVER.port }, (info) => {
   writeLogLine(
     `Proxy listening on http://${info.address}:${String(info.port)}${SERVER.basePath}, ` +
-      `access ${env.accessMode}, voucher key ${voucherKeys.topUp.keyId}`,
+      `access ${env.accessMode}, note key ${noteKeys.topUp.keyId}`,
   );
 });
 

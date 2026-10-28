@@ -8,10 +8,10 @@ import {
   createTestApp,
   TEST_HOLDER_KEY,
   TEST_HOLDER_MONTH,
-  TEST_VOUCHER_KEY,
+  TEST_NOTE_KEY,
   type TestApp,
 } from './helpers.js';
-import { redeemBody, signedVoucher } from './vouchers.js';
+import { redeemBody, signedNote } from './notes.js';
 
 const AT = Date.UTC(2026, 9, 26, 12);
 
@@ -31,12 +31,12 @@ describe('holder vouchers at the proxy', () => {
     const secret = newBalanceSecret();
     const holder = await redeem(
       app,
-      redeemBody(TEST_HOLDER_KEY, await signedVoucher(TEST_HOLDER_KEY), secret),
+      redeemBody(TEST_HOLDER_KEY, await signedNote(TEST_HOLDER_KEY), secret),
     );
     expect(((await holder.json()) as RedeemResponse).usd).toBe(CREDIT.holderVoucherUsd);
     const topUp = await redeem(
       app,
-      redeemBody(TEST_VOUCHER_KEY, await signedVoucher(TEST_VOUCHER_KEY), secret),
+      redeemBody(TEST_NOTE_KEY, await signedNote(TEST_NOTE_KEY), secret),
     );
     expect(((await topUp.json()) as RedeemResponse).usd).toBeCloseTo(1.4, 6);
   });
@@ -44,8 +44,8 @@ describe('holder vouchers at the proxy', () => {
   it('count the holder vouchers spent by the month of their key, with no balance', async () => {
     const { app } = createTestApp();
     for (let index = 0; index < 2; index += 1) {
-      const voucher = await signedVoucher(TEST_HOLDER_KEY);
-      await redeem(app, redeemBody(TEST_HOLDER_KEY, voucher, newBalanceSecret()));
+      const note = await signedNote(TEST_HOLDER_KEY);
+      await redeem(app, redeemBody(TEST_HOLDER_KEY, note, newBalanceSecret()));
     }
     const response = await app.request('/api/credit/holder-totals');
     expect((await response.json()) as HolderTotalsResponse).toEqual({

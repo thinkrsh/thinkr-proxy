@@ -9,7 +9,7 @@ import { INFERENCE } from './config/inference.js';
 import type { ErrorCode } from './contract.js';
 import type { Ledger } from './credit/ledger.js';
 import type { SyncStore } from './sync/store.js';
-import type { VoucherKeys } from './credit/voucher-key.js';
+import type { NoteKeys } from './credit/note-key.js';
 import { MESSAGES } from './config/messages.js';
 import { SERVER } from './config/server.js';
 import { SOURCED } from './config/sourcedTools.js';
@@ -39,10 +39,10 @@ export interface AppDeps {
   /** The key of the visitor: a keyed hash of the address, so the proxy never holds the address. */
   readonly clientKey: (c: Context) => string;
   readonly log: LogLine;
-  /** Vouchers spent, balances, and video jobs settled. */
+  /** Notes spent, balances, and video jobs settled. */
   readonly ledger: Ledger;
-  /** Check the blind vouchers of credit: the public keys of the issuer (apps/issuer/). */
-  readonly voucherKeys: VoucherKeys;
+  /** Check the blind notes of credit: the public keys of the issuer (apps/issuer/). */
+  readonly noteKeys: NoteKeys;
   /** The secret that seals the tickets of video jobs. */
   readonly ticketKey: Uint8Array;
   /** The encrypted backups of the app, which the proxy cannot read. */

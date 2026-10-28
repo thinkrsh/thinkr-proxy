@@ -14,8 +14,8 @@ import { MODEL_CATALOG, type CatalogModel } from '../config/models.js';
 import { TINFOIL } from '../config/tinfoil.js';
 import { balanceHash, isBalanceSecret, microsToUsd, userPricing } from '../credit/balance.js';
 import type { Ledger } from '../credit/ledger.js';
-import { checkVoucher } from '../credit/redeem.js';
-import type { VoucherKeys } from '../credit/voucher-key.js';
+import { checkNote } from '../credit/redeem.js';
+import type { NoteKeys } from '../credit/note-key.js';
 import {
   keyRedeemRequestSchema,
   type InferenceModel,
@@ -31,7 +31,7 @@ import { forwardSealedChat, sealedChatLimit, type PrivateRouteDeps } from './pri
 export interface InferenceRouteDeps extends PrivateRouteDeps {
   readonly ledger: Ledger;
   /** The public keys of the issuer, which check the holder vouchers that fill a key. */
-  readonly voucherKeys: VoucherKeys;
+  readonly noteKeys: NoteKeys;
 }
 
 /** A model of the private lane that Inference serves: one that takes a chat, with its enclave. */
@@ -73,31 +73,29 @@ export function createInferenceRoute(deps: InferenceRouteDeps): Hono {
 }
 
 /**
- * Spends holder vouchers into a key. Every voucher is checked before any is spent, so a voucher of
- * a top-up refuses the whole call; a voucher spent before is skipped, so a call can be sent again.
+ * Spends holder vouchers into a key. Every note is checked before any is spent, so a note of
+ * a top-up refuses the whole call; a note spent before is skipped, so a call can be sent again.
  */
 async function redeemIntoKey(deps: InferenceRouteDeps, c: Context): Promise<KeyRedeemResponse> {
   takeRequest(deps, c);
   const request = parseBody(keyRedeemRequestSchema, await readJson(c));
   const secret = keySecret(request.key);
   if (secret === null) throw new ProxyError('invalid_request', INFERENCE.messages.keyRequired);
-  const vouchers = await Promise.all(
-    request.vouchers.map((voucher) => checkVoucher(deps.voucherKeys, voucher)),
-  );
-  if (vouchers.some((voucher) => voucher.holderMonth === null)) {
+  const notes = await Promise.all(request.vouchers.map((note) => checkNote(deps.noteKeys, note)));
+  if (notes.some((note) => note.holderMonth === null)) {
     throw new ProxyError('voucher_invalid', INFERENCE.messages.holderOnly);
   }
   const hash = await balanceHash(secret);
   let redeemed = 0;
-  for (const voucher of vouchers) {
-    if (deps.ledger.redeem(voucher.hash, hash, voucher.micros, voucher.holderMonth) === 'ok') {
+  for (const note of notes) {
+    if (deps.ledger.redeem(note.hash, hash, note.micros, note.holderMonth) === 'ok') {
       redeemed += 1;
     }
   }
   return {
     usd: microsToUsd(deps.ledger.holderBalance(hash) ?? 0),
     redeemed,
-    spent: vouchers.length - redeemed,
+    spent: notes.length - redeemed,
   };
 }
 

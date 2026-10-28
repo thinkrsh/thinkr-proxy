@@ -1,13 +1,13 @@
 // The credit of the app (decision 48): GET /api/credit/key gives the public key that the app blinds
-// its vouchers with, and POST /api/credit/redeem spends one voucher into a balance: the voucher of
+// its notes with, and POST /api/credit/redeem spends one note into a balance: the note of
 // a top-up, or a holder voucher of any month (decision 189), each worth its own amount. The proxy
-// sees a valid voucher, never who bought or claimed it. POST /api/credit/merge moves one balance
+// sees a valid note, never who bought or claimed it. POST /api/credit/merge moves one balance
 // onto another, for two devices of one person that share an encrypted backup.
 // GET /api/credit/holder-totals counts the holder vouchers spent and what their credit paid for,
 // by month, with no balance (decision 191).
 import { Hono, type Context } from 'hono';
 
-import { CREDIT, MAX_TOP_UP_VOUCHERS } from '../config/credit.js';
+import { CREDIT, MAX_TOP_UP_NOTES } from '../config/credit.js';
 import { MESSAGES } from '../config/messages.js';
 import { PAYMENT_WORDS } from '../config/payments.js';
 import {
@@ -20,8 +20,8 @@ import {
 } from '../contract.js';
 import { balanceHash, microsToUsd } from '../credit/balance.js';
 import type { Ledger } from '../credit/ledger.js';
-import { checkVoucher } from '../credit/redeem.js';
-import type { VoucherKeys } from '../credit/voucher-key.js';
+import { checkNote } from '../credit/redeem.js';
+import type { NoteKeys } from '../credit/note-key.js';
 import { parseBody, readJson } from '../lib/body.js';
 import { toBase64Url } from '../lib/bytes.js';
 import { ProxyError } from '../lib/errors.js';
@@ -32,19 +32,19 @@ export interface CreditRouteDeps {
   readonly clientKey: (c: Context) => string;
   readonly limiter: RateLimiter;
   readonly ledger: Ledger;
-  /** The public keys of the issuer, which check the vouchers that the app spends. */
-  readonly voucherKeys: VoucherKeys;
+  /** The public keys of the issuer, which check the notes that the app spends. */
+  readonly noteKeys: NoteKeys;
 }
 
 export function createCreditRoute(deps: CreditRouteDeps): Hono {
   const key: CreditKeyResponse = {
-    keyId: deps.voucherKeys.topUp.keyId,
-    publicKey: toBase64Url(deps.voucherKeys.topUp.publicKey),
+    keyId: deps.noteKeys.topUp.keyId,
+    publicKey: toBase64Url(deps.noteKeys.topUp.publicKey),
     voucherUsd: CREDIT.voucherUsd,
     packs: [...CREDIT.packs],
-    maxVouchers: MAX_TOP_UP_VOUCHERS,
+    maxVouchers: MAX_TOP_UP_NOTES,
     payment: { ...PAYMENT_WORDS, tokens: [...PAYMENT_WORDS.tokens] },
-    holderKeys: deps.voucherKeys.holder.map((known) => ({
+    holderKeys: deps.noteKeys.holder.map((known) => ({
       keyId: known.key.keyId,
       month: known.holderMonth ?? '',
       voucherUsd: known.usd,
@@ -59,10 +59,10 @@ export function createCreditRoute(deps: CreditRouteDeps): Hono {
         throw new ProxyError('rate_limited', MESSAGES.rateLimited);
       }
       const request = parseBody(redeemRequestSchema, await readJson(c));
-      const voucher = await checkVoucher(deps.voucherKeys, request);
+      const note = await checkNote(deps.noteKeys, request);
       const hash = await balanceHash(request.balance);
-      if (deps.ledger.redeem(voucher.hash, hash, voucher.micros, voucher.holderMonth) === 'spent') {
-        throw new ProxyError('voucher_spent', MESSAGES.voucherSpent);
+      if (deps.ledger.redeem(note.hash, hash, note.micros, note.holderMonth) === 'spent') {
+        throw new ProxyError('voucher_spent', MESSAGES.noteSpent);
       }
       return c.json<RedeemResponse>({ usd: microsToUsd(deps.ledger.balance(hash) ?? 0) });
     })

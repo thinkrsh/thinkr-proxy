@@ -121,6 +121,13 @@ export function openLedger(file: string): Ledger {
       );
     },
     balance,
+    holderBalance(balanceHash) {
+      const total = balance(balanceHash);
+      if (total === null) return null;
+      const holder = selectHolder.get(balanceHash)?.micros;
+      // A balance in debt has no holder credit left, whatever its holder part says.
+      return typeof holder === 'number' ? Math.min(holder, total) : 0;
+    },
     charge(balanceHash, micros, use, at) {
       transaction(
         () => {

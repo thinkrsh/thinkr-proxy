@@ -5,6 +5,7 @@ import { createAccess } from './access/access.js';
 import { createGate } from './access/gate.js';
 import { assertCatalogIsValid } from './catalog.js';
 import type { Env } from './config/env.js';
+import { INFERENCE } from './config/inference.js';
 import type { ErrorCode } from './contract.js';
 import type { Ledger } from './credit/ledger.js';
 import type { SyncStore } from './sync/store.js';
@@ -21,6 +22,7 @@ import { createAccessRoute } from './routes/access.js';
 import { createChatRoute } from './routes/chat.js';
 import { createCreditRoute } from './routes/credit.js';
 import { createHealthRoute } from './routes/health.js';
+import { createInferenceRoute } from './routes/inference.js';
 import { createMediaRoute } from './routes/media.js';
 import { createModelsRoute } from './routes/models.js';
 import { createPrivateRoute } from './routes/private.js';
@@ -84,6 +86,21 @@ export function createApp(deps: AppDeps): Hono {
   );
   app.route('/', createCreditRoute({ ...deps, limiter }));
   app.route('/', createSyncRoute(deps));
+  // Inference (29 Oct 2026): the API of the private lane, with a limit of its own per client address.
+  const inferenceLimiter = createFixedWindowLimiter({
+    limit: INFERENCE.requestsPerWindow,
+    windowMs: LIMITS.rateWindowMs,
+    sweepThreshold: LIMITS.rateSweepThreshold,
+  });
+  app.route(
+    '/',
+    createInferenceRoute({
+      ...deps,
+      limiter: inferenceLimiter,
+      gate,
+      apiKey: deps.env.tinfoilApiKey,
+    }),
+  );
   app.notFound((c) => c.json(errorBody('invalid_request', MESSAGES.notFound), 404));
   app.onError((error, c) => {
     if (error instanceof ProxyError) {

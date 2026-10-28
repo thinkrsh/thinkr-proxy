@@ -5,11 +5,12 @@
 // /api/private/v1/audio/transcriptions and /api/private/v1/audio/speech forward a sealed recording
 // or text to the audio models of the router, which a balance or, since 26 Oct 2026, the free trial
 // pays, and POST /api/private/filter/redact a sealed message to the enclave of the privacy filter,
-// which only a balance pays.
+// which only a balance pays. Inference (routes/inference.ts) forwards its sealed chats through
+// forwardSealedChat too, paid by the holder credit of an API key.
 import { Hono, type Context } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 
-import type { Fee, Gate, TrialTerms } from '../access/gate.js';
+import type { Fee, Gate, Payer, TrialTerms } from '../access/gate.js';
 import type { PremiumPrice } from '../credit/balance.js';
 import { findTeeModel } from '../catalog.js';
 import { CREDIT } from '../config/credit.js';
@@ -80,39 +81,12 @@ export function createPrivateRoute(deps: PrivateRouteDeps): Hono {
     .post('/attestation', sizeLimit(SERVER.maxBodyBytes), async (c) =>
       fetchAttestation(deps, c.req.raw.headers, c.req.raw.signal, await readJson(c)),
     )
-    .post(TINFOIL.chatCompletionsPath, sizeLimit(SERVER.maxSealedChatBytes), async (c) => {
-      const visitor = deps.clientKey(c);
-      takeRequest(deps, visitor);
-      const { request, model } = await readSealedChat(c);
-      const balance = await deps.gate.balanceOf(c);
-      const ticket = deps.gate.admit({ visitor, balance }, model, request.body.byteLength, {
-        webSearch: request.events !== null,
-      });
-      // The usage comes once the sealed body has passed, after the status below is known.
-      let answered = false;
-      const onUsage = (metrics: UsageMetrics | null): void => {
-        if (!answered) return;
-        ticket.charge(
-          answerSpend(
-            metrics?.costUsd ?? null,
-            metrics?.usage ?? null,
-            model.cost,
-            metrics?.webSearchCalls ?? 0,
-          ),
-        );
-      };
-      let response: Response;
-      try {
-        response = await forwardSealed(deps, request, c.req.raw.signal, onUsage);
-      } catch (error) {
-        ticket.refund();
-        throw error;
-      }
-      // An EHBP problem, such as a rotated key, carries no answer: the SDK renews and asks again.
-      if (response.ok) answered = true;
-      else ticket.refund();
-      return response;
-    })
+    .post(TINFOIL.chatCompletionsPath, sealedChatLimit(), (c) =>
+      forwardSealedChat(deps, c, async (visitor) => ({
+        visitor,
+        balance: await deps.gate.balanceOf(c),
+      })),
+    )
     .post(TINFOIL.convertFilePath, sizeLimit(SERVER.maxSealedFileBytes), async (c) => {
       const visitor = deps.clientKey(c);
       takeRequest(deps, visitor);
@@ -153,6 +127,59 @@ export function createPrivateRoute(deps: PrivateRouteDeps): Hono {
           TINFOIL.privacyFilter.enclaveUrl,
         ),
     );
+}
+
+/**
+ * Who pays for one sealed chat, once its headers have passed: in the private lane, the balance that
+ * the request names or else the free trial; in Inference, the holder credit of an API key.
+ */
+export type SealedChatPayer = (visitor: string) => Promise<Payer>;
+
+/** The size limit of a sealed chat, which carries the photos and documents of the chat. */
+export function sealedChatLimit(): ReturnType<typeof bodyLimit> {
+  return sizeLimit(SERVER.maxSealedChatBytes);
+}
+
+/**
+ * Forwards one sealed chat to its enclave (decision 64). Its payer pays once the answer has passed
+ * whole, at the usage that the enclave reports, and pays nothing when the enclave fails first.
+ */
+export async function forwardSealedChat(
+  deps: PrivateRouteDeps,
+  c: Context,
+  payerOf: SealedChatPayer,
+): Promise<Response> {
+  const visitor = deps.clientKey(c);
+  takeRequest(deps, visitor);
+  const { request, model } = await readSealedChat(c);
+  const payer = await payerOf(visitor);
+  const ticket = deps.gate.admit(payer, model, request.body.byteLength, {
+    webSearch: request.events !== null,
+  });
+  // The usage comes once the sealed body has passed, after the status below is known.
+  let answered = false;
+  const onUsage = (metrics: UsageMetrics | null): void => {
+    if (!answered) return;
+    ticket.charge(
+      answerSpend(
+        metrics?.costUsd ?? null,
+        metrics?.usage ?? null,
+        model.cost,
+        metrics?.webSearchCalls ?? 0,
+      ),
+    );
+  };
+  let response: Response;
+  try {
+    response = await forwardSealed(deps, request, c.req.raw.signal, onUsage);
+  } catch (error) {
+    ticket.refund();
+    throw error;
+  }
+  // An EHBP problem, such as a rotated key, carries no answer: the SDK renews and asks again.
+  if (response.ok) answered = true;
+  else ticket.refund();
+  return response;
 }
 
 /**

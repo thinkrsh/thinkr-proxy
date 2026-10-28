@@ -18,11 +18,12 @@ import {
   type MergeResponse,
   type RedeemResponse,
 } from '../contract.js';
-import { balanceHash, microsToUsd, usdToMicros, voucherHash } from '../credit/balance.js';
+import { balanceHash, microsToUsd } from '../credit/balance.js';
 import type { Ledger } from '../credit/ledger.js';
+import { checkVoucher } from '../credit/redeem.js';
 import type { VoucherKeys } from '../credit/voucher-key.js';
 import { parseBody, readJson } from '../lib/body.js';
-import { fromBase64Url, toBase64Url } from '../lib/bytes.js';
+import { toBase64Url } from '../lib/bytes.js';
 import { ProxyError } from '../lib/errors.js';
 import type { RateLimiter } from '../lib/rate-limit.js';
 
@@ -58,16 +59,9 @@ export function createCreditRoute(deps: CreditRouteDeps): Hono {
         throw new ProxyError('rate_limited', MESSAGES.rateLimited);
       }
       const request = parseBody(redeemRequestSchema, await readJson(c));
-      const known = deps.voucherKeys.find(request.keyId);
-      if (known === null) throw new ProxyError('key_changed', MESSAGES.keyChanged);
-      const nonce = fromBase64Url(request.nonce);
-      if (!known.key.verify(nonce, fromBase64Url(request.signature))) {
-        throw new ProxyError('voucher_invalid', MESSAGES.voucherInvalid);
-      }
+      const voucher = await checkVoucher(deps.voucherKeys, request);
       const hash = await balanceHash(request.balance);
-      const voucher = await voucherHash(nonce);
-      const micros = usdToMicros(known.usd);
-      if (deps.ledger.redeem(voucher, hash, micros, known.holderMonth) === 'spent') {
+      if (deps.ledger.redeem(voucher.hash, hash, voucher.micros, voucher.holderMonth) === 'spent') {
         throw new ProxyError('voucher_spent', MESSAGES.voucherSpent);
       }
       return c.json<RedeemResponse>({ usd: microsToUsd(deps.ledger.balance(hash) ?? 0) });

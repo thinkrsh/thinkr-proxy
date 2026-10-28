@@ -43,6 +43,11 @@ export interface Ledger {
   /** What is left on a balance, in millionths of a dollar, or null when there is no such balance. */
   balance: (balanceHash: string) => number | null;
   /**
+   * The part of what is left on a balance that holder vouchers paid for, in millionths of a dollar,
+   * or null when there is no such balance. Inference spends this part alone (29 Oct 2026).
+   */
+  holderBalance: (balanceHash: string) => number | null;
+  /**
    * Takes the price of a chat, an image, or a video from a balance, at `at`. The balance may end
    * below zero by that one request. The credit of holder vouchers goes first.
    */

@@ -56,6 +56,7 @@ export const MESSAGES = {
   tooManyImagesInChat: `A chat must not carry more than ${String(LIMITS.maxImagesPerChat)} photos.`,
   imagesFromUserOnly: 'Only a message of the user may carry photos.',
   noVision: 'This model cannot see photos. Pick a model that can.',
+  noWebSearch: 'This model cannot search the web. Pick a model that can, or turn web search off.',
   promptTooLong: `A prompt must not exceed ${String(LIMITS.maxPromptChars)} characters.`,
   notChatModel: 'This model makes images or videos, not the answers of a chat.',
   notImageModel: 'This model does not make images.',

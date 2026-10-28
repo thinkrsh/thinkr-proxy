@@ -6,6 +6,7 @@ import { MODEL_CATALOG } from '../src/config/models.js';
 import { OPENROUTER } from '../src/config/openrouter.js';
 import { SERVER } from '../src/config/server.js';
 import { REASONING } from '../src/config/thinking.js';
+import { WEB_SEARCH_TOOL } from '../src/config/webSearch.js';
 import type { ErrorBody } from '../src/contract.js';
 import type { UpstreamBody } from '../src/openrouter/stream.js';
 import {
@@ -282,6 +283,86 @@ describe('POST /api/chat, Think (28 Oct 2026)', () => {
   it('answers 400 for a Think that is not true or false', async () => {
     const { app, fetchMock } = appAnswering();
     const response = await postChat(app, { ...VALID_CHAT, think: 'yes' });
+    expect(response.status).toBe(400);
+    expect((await errorOf(response)).code).toBe('invalid_request');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST /api/chat, web search (29 Oct 2026)', () => {
+  const SEARCHER = 'open/claude-haiku-5.5';
+
+  async function toolsSent(webSearch?: boolean): Promise<unknown> {
+    const { app, fetchMock } = appAnswering();
+    const chat =
+      webSearch === undefined
+        ? { ...VALID_CHAT, modelId: SEARCHER }
+        : { ...VALID_CHAT, modelId: SEARCHER, webSearch };
+    await readEvents(await postChat(app, chat));
+    const { init } = upstreamCall(fetchMock);
+    if (typeof init.body !== 'string') throw new Error('The upstream body is not a JSON string.');
+    return (JSON.parse(init.body) as UpstreamBody).tools;
+  }
+
+  it('adds the search of Exa while web search is on, and nothing otherwise', async () => {
+    expect(await toolsSent(true)).toEqual([WEB_SEARCH_TOOL]);
+    expect(await toolsSent(false)).toBeUndefined();
+    expect(await toolsSent()).toBeUndefined();
+  });
+
+  it('streams the pages found and how often the answer searched', async () => {
+    const searched = [
+      chunk({
+        choices: [
+          {
+            delta: {
+              content: '',
+              annotations: [
+                {
+                  type: 'url_citation',
+                  url_citation: { url: 'https://nodejs.org/', title: 'Node.js', content: 'Text.' },
+                },
+              ],
+            },
+          },
+        ],
+      }),
+      contentChunk('Hi'),
+      chunk({
+        choices: [{ index: 0, delta: { content: '' }, finish_reason: 'stop' }],
+        usage: {
+          prompt_tokens: 5,
+          completion_tokens: 2,
+          server_tool_use_details: { web_search_requests: 1 },
+        },
+      }),
+      DONE,
+    ];
+    const { app } = appAnswering(searched);
+    const response = await postChat(app, { ...VALID_CHAT, modelId: SEARCHER, webSearch: true });
+    expect(await readEvents(response)).toEqual([
+      { type: 'source', url: 'https://nodejs.org/', title: 'Node.js' },
+      { type: 'delta', text: 'Hi' },
+      { type: 'searched', count: 1 },
+      { type: 'done', finishReason: 'stop', usage: { inputTokens: 5, outputTokens: 2 } },
+    ]);
+  });
+
+  it('answers 400 for a model that cannot search, without calling upstream', async () => {
+    const { app, fetchMock } = appAnswering();
+    const chat = { ...VALID_CHAT, modelId: 'open/mistral-large-3', webSearch: true };
+    const response = await postChat(app, chat);
+    expect(response.status).toBe(400);
+    expect(await errorOf(response)).toEqual({
+      code: 'invalid_request',
+      message: MESSAGES.noWebSearch,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('answers 400 for a web search that is not true or false', async () => {
+    const { app, fetchMock } = appAnswering();
+    const response = await postChat(app, { ...VALID_CHAT, webSearch: 'yes' });
     expect(response.status).toBe(400);
     expect((await errorOf(response)).code).toBe('invalid_request');
     expect(fetchMock).not.toHaveBeenCalled();

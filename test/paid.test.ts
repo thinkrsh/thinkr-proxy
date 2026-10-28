@@ -4,8 +4,15 @@ import { findModel } from '../src/catalog.js';
 import { CREDIT } from '../src/config/credit.js';
 import { TINFOIL } from '../src/config/tinfoil.js';
 import { TRIAL } from '../src/config/trial.js';
+import { WEB_SEARCH_COST_USD, WEB_SEARCH_TOOL } from '../src/config/webSearch.js';
 import type { AccessResponse, ErrorBody, ModelPricing, ModelsResponse } from '../src/contract.js';
-import { balanceHash, microsToUsd, reserveMicros, usdToMicros } from '../src/credit/balance.js';
+import {
+  balanceHash,
+  microsToUsd,
+  reserveMicros,
+  searchPriceUsd,
+  usdToMicros,
+} from '../src/credit/balance.js';
 import { tokensUsd } from '../src/lib/cost.js';
 import {
   DONE,
@@ -325,5 +332,87 @@ describe('web search and documents in the private lane (decision 142)', () => {
     const poor = await fundedBalance(testApp.ledger, CREDIT.documentUsd / 2);
     expect((await postDocument(testApp, balanceHeader(poor))).status).toBe(402);
     expect(testApp.fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('web search in the open lane (29 Oct 2026)', () => {
+  const HAIKU_SEARCH = { ...VALID_CHAT, modelId: 'open/claude-haiku-5.5', webSearch: true };
+
+  function searchedAnswer(costUsd: number, searches: number): Response {
+    const last = chunk({
+      choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+      usage: {
+        prompt_tokens: OPEN_USAGE.inputTokens,
+        completion_tokens: OPEN_USAGE.outputTokens,
+        cost: costUsd,
+        server_tool_use_details: { web_search_requests: searches },
+      },
+    });
+    return upstreamResponse([contentChunk('Hi'), last, DONE]);
+  }
+
+  async function openLane(testApp: TestApp) {
+    const access = (await (await testApp.app.request('/api/access')).json()) as AccessResponse;
+    if (access.mode !== 'trial') throw new Error('The test app runs the free trial.');
+    return access.lanes.open;
+  }
+
+  it('prices a search at the fee of Exa plus 25% (decision 134)', () => {
+    expect(CREDIT.openWebSearchUsd).toBeCloseTo(WEB_SEARCH_COST_USD * CREDIT.markup, 10);
+  });
+
+  it('prices each search of the open lane, and the private lane once an answer', () => {
+    expect(searchPriceUsd('open', 0)).toBe(0);
+    expect(searchPriceUsd('open', 3)).toBe(3 * CREDIT.openWebSearchUsd);
+    expect(searchPriceUsd('private', 0)).toBe(0);
+    expect(searchPriceUsd('private', 2)).toBe(CREDIT.webSearchUsd);
+  });
+
+  it('adds the price of each search to the tokens of a model with a price', async () => {
+    const testApp = trialApp(() => searchedAnswer(0.0144, 2));
+    const secret = await fundedBalance(testApp.ledger, 1);
+    await (await postChat(testApp.app, HAIKU_SEARCH, { headers: balanceHeader(secret) })).text();
+    const tokens = tokensUsd(OPEN_USAGE, priceOf(HAIKU_SEARCH.modelId));
+    expect(await micros(testApp, secret)).toBe(
+      usdToMicros(1) - usdToMicros(tokens + 2 * CREDIT.openWebSearchUsd),
+    );
+  });
+
+  it('charges a model with no price what the answer cost, searches included, plus 25%', async () => {
+    const testApp = trialApp(() => searchedAnswer(0.0144, 2));
+    const secret = await fundedBalance(testApp.ledger, 1);
+    const chat = { ...VALID_CHAT, webSearch: true };
+    await (await postChat(testApp.app, chat, { headers: balanceHeader(secret) })).text();
+    expect(await micros(testApp, secret)).toBe(
+      usdToMicros(1) - usdToMicros(0.0144 * CREDIT.markup),
+    );
+  });
+
+  it('holds the most that the searches of an answer can cost in the reserve', async () => {
+    const model = findModel(HAIKU_SEARCH.modelId);
+    if (!model) throw new Error('The catalog lost Claude Haiku 5.5.');
+    const plain = reserveMicros(model, VALID_CHAT.messages[0]?.content.length ?? 0);
+    const most = searchPriceUsd('open', WEB_SEARCH_TOOL.parameters.max_uses);
+    const withSearch = reserveMicros(model, VALID_CHAT.messages[0]?.content.length ?? 0, true);
+    expect(microsToUsd(withSearch - plain)).toBeCloseTo(most, 5);
+    const testApp = trialApp(() => searchedAnswer(0.0144, 2));
+    const secret = await fundedBalance(testApp.ledger, microsToUsd(plain));
+    const searching = await postChat(testApp.app, HAIKU_SEARCH, { headers: balanceHeader(secret) });
+    expect(searching.status).toBe(402);
+    expect(testApp.fetchMock).not.toHaveBeenCalled();
+    const plainChat = { ...HAIKU_SEARCH, webSearch: false };
+    const answered = await postChat(testApp.app, plainChat, { headers: balanceHeader(secret) });
+    expect(answered.status).toBe(200);
+  });
+
+  it('lets the free trial search the web, with the cost in the budget of the lane', async () => {
+    const testApp = trialApp(() => searchedAnswer(TRIAL.dailyBudgetUsd.open + 0.01, 1));
+    const response = await postChat(testApp.app, HAIKU_SEARCH);
+    expect(response.status).toBe(200);
+    await response.text();
+    await vi.waitFor(async () => {
+      expect((await openLane(testApp)).paused).toBe(true);
+    });
+    expect(testApp.fetchMock).toHaveBeenCalledTimes(1);
   });
 });

@@ -24,12 +24,14 @@ import {
 } from './config/thinking.js';
 import { TRIAL } from './config/trial.js';
 import { VIDEO_TOOLS, type VideoTools } from './config/videoTools.js';
+import { NO_WEB_SEARCH } from './config/webSearch.js';
 import type {
   AudioInfo,
   Lane,
   ImageToolsInfo,
   ListedModel,
   MediaInfo,
+  ModelInfo,
   ModelKind,
   ModelsResponse,
   PrivacyLevel,
@@ -64,6 +66,7 @@ export function modelsResponse(
     ),
     extras: {
       webSearchUsd: CREDIT.webSearchUsd,
+      openWebSearchUsd: CREDIT.openWebSearchUsd,
       documentUsd: CREDIT.documentUsd,
       voiceInputUsd: CREDIT.voiceInputUsd,
       voiceReplyUsd: CREDIT.voiceReplyUsd,
@@ -79,6 +82,7 @@ function listedModel(model: CatalogModel, access: Pick<Access, 'opens'>): Listed
     ...info,
     alwaysThinks: ALWAYS_THINKING.has(info.id),
     thinksInFull: NO_LESS_THINKING.has(info.id),
+    webSearch: searchesWeb(info),
     pricing: userPricing(model),
     media: mediaInfo(model.media, IMAGE_TOOLS[info.id], VIDEO_TOOLS[info.id]),
     audio: model.media?.kind === 'audio' ? audioInfo(model.media, findAudioTools(info.id)) : null,
@@ -201,6 +205,14 @@ function toolsInfo(tools: ImageTools): ImageToolsInfo {
 
 export function findModel(id: string): CatalogModel | undefined {
   return MODEL_CATALOG.find((model) => model.info.id === id);
+}
+
+/**
+ * True for a model that can search the web: every model of text but those of config/webSearch.ts,
+ * whose endpoints take no tools (29 Oct 2026).
+ */
+export function searchesWeb(info: Pick<ModelInfo, 'id' | 'kind'>): boolean {
+  return info.kind === 'text' && !NO_WEB_SEARCH.has(info.id);
 }
 
 /** The tools of a video model of the catalog, which assertCatalogIsValid makes sure it has. */
@@ -619,6 +631,27 @@ export function thinkingProblems(
   return problems;
 }
 
+/**
+ * Every model that config/webSearch.ts keeps from web search is a model of text of the open lane
+ * in the catalog: the private lane searches through the router of its enclave (29 Oct 2026).
+ */
+export function webSearchProblems(
+  catalog: readonly CatalogModel[],
+  noWebSearch: ReadonlySet<string>,
+): string[] {
+  const infoById = new Map(catalog.map((model) => [model.info.id, model.info]));
+  const problems: string[] = [];
+  for (const id of noWebSearch) {
+    const info = infoById.get(id);
+    if (info === undefined) {
+      problems.push(`${id}: kept from web search but not in the catalog`);
+    } else if (info.kind !== 'text' || info.lane !== 'open') {
+      problems.push(`${id}: only a model of text of the open lane is kept from web search`);
+    }
+  }
+  return problems;
+}
+
 export function assertCatalogIsValid(): void {
   const problems = [
     ...catalogProblems(MODEL_CATALOG, DEFAULT_MODEL_ID),
@@ -632,6 +665,7 @@ export function assertCatalogIsValid(): void {
       noDefault: NO_DEFAULT_THINKING,
       noLess: NO_LESS_THINKING,
     }),
+    ...webSearchProblems(MODEL_CATALOG, NO_WEB_SEARCH),
   ];
   if (problems.length > 0) throw new Error(`Invalid model catalog: ${problems.join('; ')}.`);
 }

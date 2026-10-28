@@ -217,6 +217,11 @@ export interface ModelInfo {
   alwaysThinks: boolean;
   /** The model always thinks in full: Think off cannot make it think less (29 Oct 2026). */
   thinksInFull: boolean;
+  /**
+   * The model can search the web: every model of text of the private lane (decision 142), and
+   * those of the open lane that take tools (29 Oct 2026).
+   */
+  webSearch: boolean;
   vision: boolean;
   /** False: the app shows the model locked ("Soon"). */
   available: boolean;
@@ -246,10 +251,12 @@ export interface ListedModel extends ModelInfo {
   lockReason: LockReason | null;
 }
 
-/** What the private lane charges beyond tokens, in USD (decisions 52 and 142). */
+/** What the lanes charge beyond tokens, in USD (decisions 52 and 142). */
 export interface ExtraPrices {
-  /** Once for each answer that searched the web. */
+  /** Once for each answer of the private lane that searched the web. */
   webSearchUsd: number;
+  /** For each search of the web in the open lane (29 Oct 2026). */
+  openWebSearchUsd: number;
   /** For each document converted. */
   documentUsd: number;
   /**
@@ -410,6 +417,11 @@ export const chatRequestSchema = z.strictObject({
    * app from before Think sends none, and the model does as its maker set it.
    */
   think: z.boolean().optional(),
+  /**
+   * Web search (29 Oct 2026): true lets a model that can search the web do so through Exa. An app
+   * from before sends none, and the model answers from what it knows.
+   */
+  webSearch: z.boolean().optional(),
 });
 
 export type ChatMessage = z.infer<typeof chatMessageSchema>;
@@ -420,9 +432,15 @@ export interface ChatUsage {
   outputTokens: number;
 }
 
+/**
+ * The events of an answer. With web search on (29 Oct 2026), 'source' names a page that a search
+ * found, and 'searched' tells, before 'done', how often the answer searched.
+ */
 export type ChatEvent =
   | { type: 'delta'; text: string }
   | { type: 'reasoning'; text: string }
+  | { type: 'source'; url: string; title: string }
+  | { type: 'searched'; count: number }
   | { type: 'done'; finishReason: string | null; usage: ChatUsage | null }
   | { type: 'error'; code: ErrorCode; message: string };
 

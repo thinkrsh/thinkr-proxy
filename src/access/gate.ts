@@ -44,7 +44,10 @@ export interface ChatTicket {
 
 /** What a chat asks for beyond its tokens. */
 export interface ChatOptions {
-  /** Web search is on (decision 142): the reserve of a balance holds its price. */
+  /**
+   * Web search is on (decision 142; the open lane since 29 Oct 2026): the reserve of a balance
+   * holds the most that its searches can cost.
+   */
   readonly webSearch: boolean;
   /**
    * The request costs more than the defaults of its model, such as an image of a larger size or

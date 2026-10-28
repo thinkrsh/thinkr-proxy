@@ -35,6 +35,12 @@ export const CREDIT = {
   webSearchUsd: 0.0625,
   documentUsd: 0.0625,
   /**
+   * What one search of the web costs a balance in the open lane (29 Oct 2026): the fee of Exa in
+   * config/webSearch.ts plus 25%, for each search that the model ran (decision 134: tools at cost
+   * plus 25%). The free trial has it too, and pays the fee from its budget.
+   */
+  openWebSearchUsd: 0.00875,
+  /**
    * The Premium of the private lane, which only a balance pays (the owner, 23 Oct 2026: "jadi
    * nanti user kita bisa pake premium akses di chat nya"). One part of an answer spoken and one
    * message through the privacy filter cost the fee of Tinfoil in config/tinfoil.ts plus 25%

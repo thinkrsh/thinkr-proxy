@@ -4,7 +4,7 @@ import { bodyLimit } from 'hono/body-limit';
 import { streamSSE, type SSEStreamingApi } from 'hono/streaming';
 
 import type { Gate } from '../access/gate.js';
-import { findModel, reasoningOf } from '../catalog.js';
+import { findModel, reasoningOf, searchesWeb } from '../catalog.js';
 import { imageCount, parseChatRequest } from '../chat-request.js';
 import type { CatalogModel } from '../config/models.js';
 import { MESSAGES } from '../config/messages.js';
@@ -48,8 +48,14 @@ export function createChatRoute(deps: ChatRouteDeps): Hono {
     if (imageCount(request.messages) > 0 && !model.info.vision) {
       throw new ProxyError('invalid_request', MESSAGES.noVision);
     }
+    const webSearch = request.webSearch === true;
+    if (webSearch && !searchesWeb(model.info)) {
+      throw new ProxyError('invalid_request', MESSAGES.noWebSearch);
+    }
     const balance = await deps.gate.balanceOf(c);
-    const ticket = deps.gate.admit({ visitor, balance }, model, chatChars(request.messages));
+    const ticket = deps.gate.admit({ visitor, balance }, model, chatChars(request.messages), {
+      webSearch,
+    });
     const upstream = new UpstreamChat(
       deps,
       {
@@ -57,6 +63,7 @@ export function createChatRoute(deps: ChatRouteDeps): Hono {
         privacy: model.info.privacy,
         messages: request.messages,
         reasoning: reasoningOf(model, request.think),
+        webSearch,
       },
       c.req.raw.signal,
     );
@@ -68,7 +75,7 @@ export function createChatRoute(deps: ChatRouteDeps): Hono {
       throw error;
     }
     const onSpend = (spend: AnswerSpend): void => {
-      ticket.charge(answerSpend(spend.costUsd, spend.usage, model.cost));
+      ticket.charge(answerSpend(spend.costUsd, spend.usage, model.cost, spend.webSearches));
     };
     return streamSSE(c, async (stream) => {
       stream.onAbort(() => {

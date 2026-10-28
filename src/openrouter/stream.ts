@@ -7,6 +7,7 @@ import {
   type ProviderPreferences,
 } from '../config/openrouter.js';
 import type { ReasoningRequest } from '../config/thinking.js';
+import { WEB_SEARCH_TOOL } from '../config/webSearch.js';
 import type { ChatEvent, ChatMessage, PrivacyLevel } from '../contract.js';
 import { ProxyError, upstreamStatusError } from '../lib/errors.js';
 import { UpstreamLifetime, type StopCause } from '../lib/upstream-lifetime.js';
@@ -24,6 +25,8 @@ export interface UpstreamRequest {
   readonly messages: readonly ChatMessage[];
   /** What Think asks of the model (catalog.ts, `reasoningOf`); null leaves the model as it is. */
   readonly reasoning: ReasoningRequest | null;
+  /** The model may search the web through Exa (29 Oct 2026). */
+  readonly webSearch: boolean;
 }
 
 /** The parts of a message with photos, in the format of chat completions. */
@@ -37,6 +40,7 @@ export interface UpstreamBody {
   stream: true;
   provider: ProviderPreferences;
   reasoning?: ReasoningRequest;
+  tools?: (typeof WEB_SEARCH_TOOL)[];
 }
 
 export function upstreamBody(request: UpstreamRequest): UpstreamBody {
@@ -50,6 +54,7 @@ export function upstreamBody(request: UpstreamRequest): UpstreamBody {
     stream: true,
     provider: providerPreferencesFor(request.privacy),
     ...(request.reasoning === null ? {} : { reasoning: request.reasoning }),
+    ...(request.webSearch ? { tools: [WEB_SEARCH_TOOL] } : {}),
   };
 }
 

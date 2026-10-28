@@ -2,7 +2,8 @@
 // chat: its tokens at the price of its model (decision 132), or else its cost plus 25% (decision 52).
 import { CREDIT } from '../config/credit.js';
 import type { CatalogModel, MediaSettings } from '../config/models.js';
-import type { ModelPricing } from '../contract.js';
+import { WEB_SEARCH_TOOL } from '../config/webSearch.js';
+import type { Lane, ModelPricing } from '../contract.js';
 import { fromBase64Url, randomBytes, sha256, toBase64Url } from '../lib/bytes.js';
 import { tokensUsd, type ChatSpend } from '../lib/cost.js';
 
@@ -55,13 +56,31 @@ export function userPricing(model: Pick<CatalogModel, 'cost' | 'price'>): ModelP
 
 /**
  * What a chat costs the user: its tokens at the price of its model (decision 132), whatever the
- * provider charged, and the price of web search once when the answer searched (decision 142); or
- * else what its answer cost at the provider, search included, plus 25% (decision 52).
+ * provider charged, and its searches of the web; or else what its answer cost at the provider,
+ * searches included, plus 25% (decision 52).
  */
-export function chatPriceMicros(model: Pick<CatalogModel, 'price'>, spend: ChatSpend): number {
+export function chatPriceMicros(
+  model: Pick<CatalogModel, 'price' | 'info'>,
+  spend: ChatSpend,
+): number {
   if (model.price === null) return usdToMicros(spend.costUsd * CREDIT.markup);
-  const search = spend.webSearches > 0 ? CREDIT.webSearchUsd : 0;
+  const search = searchPriceUsd(model.info.lane, spend.webSearches);
   return usdToMicros(tokensUsd(spend.usage, model.price) + search);
+}
+
+/**
+ * What the searches of the web of one answer cost the user: in the private lane, the price once
+ * when the answer searched, however often (decision 142); in the open lane, the price of each
+ * search (29 Oct 2026).
+ */
+export function searchPriceUsd(lane: Lane, searches: number): number {
+  if (lane === 'open') return searches * CREDIT.openWebSearchUsd;
+  return searches > 0 ? CREDIT.webSearchUsd : 0;
+}
+
+/** The most that the searches of one answer can cost: in the open lane, all that it may run. */
+function searchReserveUsd(lane: Lane): number {
+  return searchPriceUsd(lane, lane === 'open' ? WEB_SEARCH_TOOL.parameters.max_uses : 1);
 }
 
 /**
@@ -101,8 +120,8 @@ export function videoPriceMicros(reportedCostUsd: number | null, paidMicros: num
 /**
  * The least a balance must hold before a chat starts: its input, estimated from the size of the
  * chat (or of the sealed body, which the proxy cannot read) but never past the context of the
- * model, a reserve for the answer, and the price of web search when it is on, at the price that
- * the user pays. Before an image or a video: its price, about.
+ * model, a reserve for the answer, and the most that its searches of the web can cost when web
+ * search is on, at the price that the user pays. Before an image or a video: its price, about.
  */
 export function reserveMicros(
   model: Pick<CatalogModel, 'cost' | 'price' | 'info' | 'media'>,
@@ -118,5 +137,5 @@ export function reserveMicros(
     model.info.contextTokens,
   );
   const tokens = tokensUsd({ inputTokens, outputTokens: CREDIT.reserveOutputTokens }, pricing);
-  return usdToMicros(tokens + (webSearch ? CREDIT.webSearchUsd : 0));
+  return usdToMicros(tokens + (webSearch ? searchReserveUsd(model.info.lane) : 0));
 }

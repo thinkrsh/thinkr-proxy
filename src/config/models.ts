@@ -53,11 +53,11 @@ import type {
 
 /**
  * What the catalog knows of a model. The proxy adds the price, the tools that the user sees, and
- * whether the model always thinks (config/thinking.ts).
+ * whether the model always thinks (config/thinking.ts) or can search the web (config/webSearch.ts).
  */
 export type CatalogInfo = Omit<
   ModelInfo,
-  'pricing' | 'media' | 'audio' | 'sourced' | 'alwaysThinks' | 'thinksInFull'
+  'pricing' | 'media' | 'audio' | 'sourced' | 'alwaysThinks' | 'thinksInFull' | 'webSearch'
 >;
 
 /**

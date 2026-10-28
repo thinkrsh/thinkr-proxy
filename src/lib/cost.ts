@@ -9,7 +9,7 @@ const TOKENS_PER_PRICE_UNIT = 1_000_000;
 export interface ChatSpend {
   readonly costUsd: number;
   readonly usage: ChatUsage;
-  /** Searches of the web in the answer (decision 142); only the private lane has them. */
+  /** Searches of the web in the answer (decision 142; the open lane since 29 Oct 2026). */
   readonly webSearches: number;
 }
 

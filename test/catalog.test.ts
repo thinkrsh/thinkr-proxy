@@ -8,11 +8,14 @@ import {
   modelsResponse,
   thinkingProblems,
   trialModelIds,
+  webSearchProblems,
 } from '../src/catalog.js';
 import { CREDIT } from '../src/config/credit.js';
 import { DEFAULT_MODEL_ID, MODEL_CATALOG, type CatalogModel } from '../src/config/models.js';
 import { ALWAYS_THINKING, NO_DEFAULT_THINKING, NO_LESS_THINKING } from '../src/config/thinking.js';
 import { TRIAL } from '../src/config/trial.js';
+import { NO_WEB_SEARCH } from '../src/config/webSearch.js';
+import type { ModelKind } from '../src/contract.js';
 
 function catalogModel(id: string): CatalogModel {
   const model = findModel(id);
@@ -146,6 +149,33 @@ describe('the thinking of the models (28 Oct 2026)', () => {
     const inFull = [...listed.values()].filter((model) => model.thinksInFull).map(({ id }) => id);
     expect(inFull.sort()).toEqual(['open/gpt-5.4-pro', 'open/gpt-5.5-pro', 'private/kimi-k3']);
     expect(listed.get('open/glm-5.3-flash')?.thinksInFull).toBe(false);
+  });
+});
+
+describe('the web search of the models (29 Oct 2026)', () => {
+  it('keeps from web search only models of text of the open lane in the catalog', () => {
+    expect(webSearchProblems(MODEL_CATALOG, NO_WEB_SEARCH)).toEqual([]);
+  });
+
+  it('finds a model outside the catalog, one of the private lane, and one of images', () => {
+    const image = MODEL_CATALOG.find(({ info }) => info.kind === 'image');
+    if (image === undefined) throw new Error('The catalog has no image model.');
+    const kept = new Set(['open/nothing', 'private/gpt-oss-120b', image.info.id]);
+    expect(webSearchProblems(MODEL_CATALOG, kept)).toEqual([
+      'open/nothing: kept from web search but not in the catalog',
+      'private/gpt-oss-120b: only a model of text of the open lane is kept from web search',
+      `${image.info.id}: only a model of text of the open lane is kept from web search`,
+    ]);
+  });
+
+  it('tells the app which models search the web, and the price of a search', () => {
+    const response = modelsResponse({ opens: () => true }, new Set<ModelKind>(['text', 'image']));
+    const listed = new Map(response.models.map((m) => [m.id, m]));
+    expect(listed.get('private/gpt-oss-120b')?.webSearch).toBe(true);
+    expect(listed.get('open/claude-haiku-5.5')?.webSearch).toBe(true);
+    expect(listed.get('open/mistral-large-3')?.webSearch).toBe(false);
+    expect(response.models.filter((m) => m.kind === 'image').some((m) => m.webSearch)).toBe(false);
+    expect(response.extras.openWebSearchUsd).toBe(CREDIT.openWebSearchUsd);
   });
 });
 

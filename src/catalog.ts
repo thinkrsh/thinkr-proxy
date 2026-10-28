@@ -78,6 +78,7 @@ function listedModel(model: CatalogModel, access: Pick<Access, 'opens'>): Listed
   return {
     ...info,
     alwaysThinks: ALWAYS_THINKING.has(info.id),
+    thinksInFull: NO_LESS_THINKING.has(info.id),
     pricing: userPricing(model),
     media: mediaInfo(model.media, IMAGE_TOOLS[info.id], VIDEO_TOOLS[info.id]),
     audio: model.media?.kind === 'audio' ? audioInfo(model.media, findAudioTools(info.id)) : null,

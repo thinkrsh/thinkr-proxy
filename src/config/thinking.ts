@@ -80,12 +80,15 @@ export const ALWAYS_THINKING: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * The models of `ALWAYS_THINKING` that take no effort under the one they use by default, medium, so
- * Think off asks them nothing (`supported_efforts`: xhigh, high, medium).
+ * The models of `ALWAYS_THINKING` that take no effort under the one they use by default, so Think off
+ * asks them nothing and the app keeps Think on for them (29 Oct 2026): GPT-5.4 Pro and GPT-5.5 Pro
+ * (`supported_efforts`: xhigh, high, medium; by default medium), and Kimi K3 of the private lane,
+ * whose `reasoningConfig` takes no effort.
  */
 export const NO_LESS_THINKING: ReadonlySet<string> = new Set([
   'open/gpt-5.4-pro',
   'open/gpt-5.5-pro',
+  'private/kimi-k3',
 ]);
 
 /**

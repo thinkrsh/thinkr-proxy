@@ -140,6 +140,13 @@ describe('the thinking of the models (28 Oct 2026)', () => {
     expect(listed.get('open/deepseek-v4.1-flash')?.alwaysThinks).toBe(false);
     expect(listed.get('private/deepseek-v4.1-flash')?.alwaysThinks).toBe(false);
   });
+
+  it('tells the app which models always think in full, so Think stays on (29 Oct 2026)', () => {
+    const listed = new Map(modelsResponse({ opens: () => true }).models.map((m) => [m.id, m]));
+    const inFull = [...listed.values()].filter((model) => model.thinksInFull).map(({ id }) => id);
+    expect(inFull.sort()).toEqual(['open/gpt-5.4-pro', 'open/gpt-5.5-pro', 'private/kimi-k3']);
+    expect(listed.get('open/glm-5.3-flash')?.thinksInFull).toBe(false);
+  });
 });
 
 describe('findTeeModel', () => {

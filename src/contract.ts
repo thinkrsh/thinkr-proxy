@@ -213,8 +213,10 @@ export interface ModelInfo {
   description: string;
   contextTokens: number;
   reasoning: boolean;
-  /** The model thinks before every answer, so Think cannot turn it off (28 Oct 2026). */
+  /** The model thinks before every answer, so Think off only makes it think less (28 Oct 2026). */
   alwaysThinks: boolean;
+  /** The model always thinks in full: Think off cannot make it think less (29 Oct 2026). */
+  thinksInFull: boolean;
   vision: boolean;
   /** False: the app shows the model locked ("Soon"). */
   available: boolean;

@@ -2,8 +2,10 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { LIMITS } from '../src/config/limits.js';
 import { MESSAGES } from '../src/config/messages.js';
+import { MODEL_CATALOG } from '../src/config/models.js';
 import { OPENROUTER } from '../src/config/openrouter.js';
 import { SERVER } from '../src/config/server.js';
+import { REASONING } from '../src/config/thinking.js';
 import type { ErrorBody } from '../src/contract.js';
 import type { UpstreamBody } from '../src/openrouter/stream.js';
 import {
@@ -222,5 +224,66 @@ describe('POST /api/chat, errors before the stream', () => {
     }
     expect(statuses.at(-2)).toBe(400);
     expect(statuses.at(-1)).toBe(429);
+  });
+});
+
+describe('POST /api/chat, Think (28 Oct 2026)', () => {
+  /** Thinks by itself at the effort of its maker, and may stop. */
+  const THINKS_BY_ITSELF = 'open/deepseek-v4.1-flash';
+  /** Names no default, so Think asks it. */
+  const NO_DEFAULT = 'open/claude-haiku-4.5';
+  /** Always thinks. */
+  const ALWAYS = VALID_CHAT.modelId;
+
+  async function reasoningSent(modelId: string, think?: boolean): Promise<unknown> {
+    const { app, fetchMock } = appAnswering();
+    const chat =
+      think === undefined ? { ...VALID_CHAT, modelId } : { ...VALID_CHAT, modelId, think };
+    await readEvents(await postChat(app, chat));
+    const { init } = upstreamCall(fetchMock);
+    if (typeof init.body !== 'string') throw new Error('The upstream body is not a JSON string.');
+    return (JSON.parse(init.body) as UpstreamBody).reasoning;
+  }
+
+  it('stops a model that thinks by itself when Think is off, and leaves it when on', async () => {
+    expect(await reasoningSent(THINKS_BY_ITSELF, false)).toEqual(REASONING.off);
+    expect(await reasoningSent(THINKS_BY_ITSELF, true)).toBeUndefined();
+  });
+
+  it('asks a model that names no default to think when Think is on, and stops it when off', async () => {
+    expect(await reasoningSent(NO_DEFAULT, true)).toEqual(REASONING.on);
+    expect(await reasoningSent(NO_DEFAULT, false)).toEqual(REASONING.off);
+  });
+
+  it('makes a model that always thinks think less when Think is off, never stop', async () => {
+    expect(await reasoningSent(ALWAYS, false)).toEqual(REASONING.least);
+    expect(await reasoningSent(ALWAYS, true)).toBeUndefined();
+  });
+
+  it('asks nothing of a model that always thinks and has no lesser effort', async () => {
+    expect(await reasoningSent('open/gpt-5.5-pro', false)).toBeUndefined();
+  });
+
+  it('asks nothing of a model that cannot think', async () => {
+    const plain = MODEL_CATALOG.find(
+      ({ info }) =>
+        info.lane === 'open' && info.kind === 'text' && info.available && !info.reasoning,
+    );
+    if (plain === undefined) throw new Error('The catalog has no model of text that cannot think.');
+    expect(await reasoningSent(plain.info.id, true)).toBeUndefined();
+    expect(await reasoningSent(plain.info.id, false)).toBeUndefined();
+  });
+
+  it('leaves every model as it is for an app from before Think', async () => {
+    expect(await reasoningSent(THINKS_BY_ITSELF)).toBeUndefined();
+    expect(await reasoningSent(NO_DEFAULT)).toBeUndefined();
+  });
+
+  it('answers 400 for a Think that is not true or false', async () => {
+    const { app, fetchMock } = appAnswering();
+    const response = await postChat(app, { ...VALID_CHAT, think: 'yes' });
+    expect(response.status).toBe(400);
+    expect((await errorOf(response)).code).toBe('invalid_request');
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

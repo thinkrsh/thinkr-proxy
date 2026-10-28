@@ -6,6 +6,7 @@ import {
   providerPreferencesFor,
   type ProviderPreferences,
 } from '../config/openrouter.js';
+import type { ReasoningRequest } from '../config/thinking.js';
 import type { ChatEvent, ChatMessage, PrivacyLevel } from '../contract.js';
 import { ProxyError, upstreamStatusError } from '../lib/errors.js';
 import { UpstreamLifetime, type StopCause } from '../lib/upstream-lifetime.js';
@@ -21,6 +22,8 @@ export interface UpstreamRequest {
   /** The privacy level of the model, which sets the provider preferences. */
   readonly privacy: PrivacyLevel;
   readonly messages: readonly ChatMessage[];
+  /** What Think asks of the model (catalog.ts, `reasoningOf`); null leaves the model as it is. */
+  readonly reasoning: ReasoningRequest | null;
 }
 
 /** The parts of a message with photos, in the format of chat completions. */
@@ -33,6 +36,7 @@ export interface UpstreamBody {
   messages: { role: ChatMessage['role']; content: string | ContentPart[] }[];
   stream: true;
   provider: ProviderPreferences;
+  reasoning?: ReasoningRequest;
 }
 
 export function upstreamBody(request: UpstreamRequest): UpstreamBody {
@@ -45,6 +49,7 @@ export function upstreamBody(request: UpstreamRequest): UpstreamBody {
     })),
     stream: true,
     provider: providerPreferencesFor(request.privacy),
+    ...(request.reasoning === null ? {} : { reasoning: request.reasoning }),
   };
 }
 

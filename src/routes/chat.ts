@@ -4,7 +4,7 @@ import { bodyLimit } from 'hono/body-limit';
 import { streamSSE, type SSEStreamingApi } from 'hono/streaming';
 
 import type { Gate } from '../access/gate.js';
-import { findModel } from '../catalog.js';
+import { findModel, reasoningOf } from '../catalog.js';
 import { imageCount, parseChatRequest } from '../chat-request.js';
 import type { CatalogModel } from '../config/models.js';
 import { MESSAGES } from '../config/messages.js';
@@ -52,7 +52,12 @@ export function createChatRoute(deps: ChatRouteDeps): Hono {
     const ticket = deps.gate.admit({ visitor, balance }, model, chatChars(request.messages));
     const upstream = new UpstreamChat(
       deps,
-      { slug, privacy: model.info.privacy, messages: request.messages },
+      {
+        slug,
+        privacy: model.info.privacy,
+        messages: request.messages,
+        reasoning: reasoningOf(model, request.think),
+      },
       c.req.raw.signal,
     );
     let body: ReadableStream<Uint8Array>;

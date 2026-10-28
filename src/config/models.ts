@@ -51,8 +51,14 @@ import type {
   SourcedUnit,
 } from '../contract.js';
 
-/** What the catalog knows of a model. The proxy adds the price and the tools that the user sees. */
-export type CatalogInfo = Omit<ModelInfo, 'pricing' | 'media' | 'audio' | 'sourced'>;
+/**
+ * What the catalog knows of a model. The proxy adds the price, the tools that the user sees, and
+ * whether the model always thinks (config/thinking.ts).
+ */
+export type CatalogInfo = Omit<
+  ModelInfo,
+  'pricing' | 'media' | 'audio' | 'sourced' | 'alwaysThinks'
+>;
 
 /**
  * How OpenRouter takes an image request: a chat completion, which can force zero data retention,

@@ -6,10 +6,12 @@ import {
   findTeeModel,
   isDearest,
   modelsResponse,
+  thinkingProblems,
   trialModelIds,
 } from '../src/catalog.js';
 import { CREDIT } from '../src/config/credit.js';
 import { DEFAULT_MODEL_ID, MODEL_CATALOG, type CatalogModel } from '../src/config/models.js';
+import { ALWAYS_THINKING, NO_DEFAULT_THINKING, NO_LESS_THINKING } from '../src/config/thinking.js';
 import { TRIAL } from '../src/config/trial.js';
 
 function catalogModel(id: string): CatalogModel {
@@ -103,6 +105,40 @@ describe('the dearest models of the trial', () => {
       expect(isDearest(model)).toBe(false);
       expect(model.info.kind).not.toBe('video');
     }
+  });
+});
+
+describe('the thinking of the models (28 Oct 2026)', () => {
+  it('names only models of text of the catalog that can think', () => {
+    const lists = {
+      always: ALWAYS_THINKING,
+      noDefault: NO_DEFAULT_THINKING,
+      noLess: NO_LESS_THINKING,
+    };
+    expect(thinkingProblems(MODEL_CATALOG, lists)).toEqual([]);
+  });
+
+  it('finds a model outside the catalog, one that cannot think, and a lane or a class too many', () => {
+    const plain = MODEL_CATALOG.find(({ info }) => info.kind === 'text' && !info.reasoning);
+    if (plain === undefined) throw new Error('The catalog has no model of text that cannot think.');
+    const always = new Set(['open/nothing', plain.info.id, 'open/claude-haiku-4.5']);
+    const noDefault = new Set(['open/claude-haiku-4.5', 'private/deepseek-v4.1-flash']);
+    const noLess = new Set(['open/deepseek-v4.1-flash']);
+    expect(thinkingProblems(MODEL_CATALOG, { always, noDefault, noLess })).toEqual([
+      'open/deepseek-v4.1-flash: only a model that always thinks lacks a lesser effort',
+      'open/nothing: named for thinking but not in the catalog',
+      `${plain.info.id}: named for thinking but cannot think`,
+      'open/claude-haiku-4.5: cannot both always think and have no default',
+      'private/deepseek-v4.1-flash: the private lane is never asked to think through OpenRouter',
+    ]);
+  });
+
+  it('tells the app which models always think, in both lanes', () => {
+    const listed = new Map(modelsResponse({ opens: () => true }).models.map((m) => [m.id, m]));
+    expect(listed.get('open/glm-5.3-flash')?.alwaysThinks).toBe(true);
+    expect(listed.get('private/gpt-oss-120b')?.alwaysThinks).toBe(true);
+    expect(listed.get('open/deepseek-v4.1-flash')?.alwaysThinks).toBe(false);
+    expect(listed.get('private/deepseek-v4.1-flash')?.alwaysThinks).toBe(false);
   });
 });
 

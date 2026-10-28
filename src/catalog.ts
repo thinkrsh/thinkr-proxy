@@ -15,6 +15,13 @@ import {
 } from './config/models.js';
 import { LIMITS } from './config/limits.js';
 import { SOURCED_TOOLS, type SourcedTools } from './config/sourcedTools.js';
+import {
+  ALWAYS_THINKING,
+  NO_DEFAULT_THINKING,
+  NO_LESS_THINKING,
+  REASONING,
+  type ReasoningRequest,
+} from './config/thinking.js';
 import { TRIAL } from './config/trial.js';
 import { VIDEO_TOOLS, type VideoTools } from './config/videoTools.js';
 import type {
@@ -70,6 +77,7 @@ function listedModel(model: CatalogModel, access: Pick<Access, 'opens'>): Listed
   const lockReason = !info.available ? 'soon' : access.opens(info.id) ? null : 'credit';
   return {
     ...info,
+    alwaysThinks: ALWAYS_THINKING.has(info.id),
     pricing: userPricing(model),
     media: mediaInfo(model.media, IMAGE_TOOLS[info.id], VIDEO_TOOLS[info.id]),
     audio: model.media?.kind === 'audio' ? audioInfo(model.media, findAudioTools(info.id)) : null,
@@ -239,6 +247,23 @@ export function trialModelIds(): string[] {
     const model = findModel(id);
     return model !== undefined && !isDearest(model);
   });
+}
+
+/**
+ * What a chat of the open lane asks of thinking (Think, 28 Oct 2026). Think off stops a model, or
+ * makes one that always thinks think as little as it takes; Think on asks a model that names no
+ * default. Nothing for a model that never thinks, nor for an app from before Think, so the model
+ * does as its maker set it.
+ */
+export function reasoningOf(
+  model: Pick<CatalogModel, 'info'>,
+  think: boolean | undefined,
+): ReasoningRequest | null {
+  const { id, reasoning } = model.info;
+  if (think === undefined || !reasoning) return null;
+  if (ALWAYS_THINKING.has(id)) return think || NO_LESS_THINKING.has(id) ? null : REASONING.least;
+  if (!think) return REASONING.off;
+  return NO_DEFAULT_THINKING.has(id) ? REASONING.on : null;
 }
 
 /** The model of the private lane that a sealed request names in its model header. */
@@ -553,6 +578,46 @@ function sourcedToolProblems(
   return problems;
 }
 
+/** The lists of config/thinking.ts. */
+export interface ThinkingLists {
+  readonly always: ReadonlySet<string>;
+  readonly noDefault: ReadonlySet<string>;
+  readonly noLess: ReadonlySet<string>;
+}
+
+/**
+ * Every model that config/thinking.ts names is a model of text of the catalog that can think, only
+ * a model of the open lane that may stop thinking is asked to think, and only a model that always
+ * thinks can lack a lesser effort (28 Oct 2026).
+ */
+export function thinkingProblems(
+  catalog: readonly CatalogModel[],
+  { always, noDefault, noLess }: ThinkingLists,
+): string[] {
+  const infoById = new Map(catalog.map((model) => [model.info.id, model.info]));
+  const problems: string[] = [];
+  for (const id of noLess) {
+    if (!always.has(id)) {
+      problems.push(`${id}: only a model that always thinks lacks a lesser effort`);
+    }
+  }
+  for (const id of new Set([...always, ...noDefault])) {
+    const info = infoById.get(id);
+    if (info === undefined) {
+      problems.push(`${id}: named for thinking but not in the catalog`);
+    } else if (info.kind !== 'text' || !info.reasoning) {
+      problems.push(`${id}: named for thinking but cannot think`);
+    }
+  }
+  for (const id of noDefault) {
+    if (always.has(id)) problems.push(`${id}: cannot both always think and have no default`);
+    if (infoById.get(id)?.lane === 'private') {
+      problems.push(`${id}: the private lane is never asked to think through OpenRouter`);
+    }
+  }
+  return problems;
+}
+
 export function assertCatalogIsValid(): void {
   const problems = [
     ...catalogProblems(MODEL_CATALOG, DEFAULT_MODEL_ID),
@@ -561,6 +626,11 @@ export function assertCatalogIsValid(): void {
     ...videoToolsProblems(MODEL_CATALOG, VIDEO_TOOLS),
     ...audioToolsProblems(MODEL_CATALOG, AUDIO_TOOLS),
     ...sourcedToolsProblems(MODEL_CATALOG, SOURCED_TOOLS),
+    ...thinkingProblems(MODEL_CATALOG, {
+      always: ALWAYS_THINKING,
+      noDefault: NO_DEFAULT_THINKING,
+      noLess: NO_LESS_THINKING,
+    }),
   ];
   if (problems.length > 0) throw new Error(`Invalid model catalog: ${problems.join('; ')}.`);
 }

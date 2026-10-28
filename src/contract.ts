@@ -213,6 +213,8 @@ export interface ModelInfo {
   description: string;
   contextTokens: number;
   reasoning: boolean;
+  /** The model thinks before every answer, so Think cannot turn it off (28 Oct 2026). */
+  alwaysThinks: boolean;
   vision: boolean;
   /** False: the app shows the model locked ("Soon"). */
   available: boolean;
@@ -401,6 +403,11 @@ export const chatRequestSchema = z.strictObject({
     .array(chatMessageSchema)
     .min(1, MESSAGES.noMessages)
     .max(LIMITS.maxMessages, MESSAGES.tooManyMessages),
+  /**
+   * Think in the message box (28 Oct 2026): false asks a model that can think to answer at once. An
+   * app from before Think sends none, and the model does as its maker set it.
+   */
+  think: z.boolean().optional(),
 });
 
 export type ChatMessage = z.infer<typeof chatMessageSchema>;

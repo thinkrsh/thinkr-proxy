@@ -3,8 +3,11 @@
 // API key is a balance that only holder vouchers fill, and a call spends their credit alone (the
 // owner, 29 Oct 2026: "kita kan engga jual kita bikin kaya airdrop voucher").
 
-/** Where a developer makes a key and adds holder vouchers to it (apps/dash/, route /api-keys). */
-const KEYS_PAGE_URL = 'https://dash.thinkr.sh/api-keys';
+/**
+ * Where a developer makes a key and adds holder vouchers to it: the app since 30 Oct 2026 (apps/app/,
+ * ROUTES.keys), in place of the dashboard.
+ */
+const KEYS_PAGE_URL = 'https://chat.thinkr.sh/keys';
 
 export const INFERENCE = {
   /**

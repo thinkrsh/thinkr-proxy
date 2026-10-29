@@ -1,6 +1,6 @@
 // What the routes of Thinkr Inference take and answer (29 Oct 2026). The SDK (apps/sdk/) and the
-// page of API keys of the dashboard (apps/dash/) read these shapes: change them together. Names
-// follow the OpenAI API, in snake case, where it has one.
+// pages of API keys of the app (apps/app/, since 30 Oct 2026) and of the dashboard (apps/dash/) read
+// these shapes: change them together. Names follow the OpenAI API, in snake case, where it has one.
 import { z } from 'zod';
 
 import { INFERENCE } from '../config/inference.js';

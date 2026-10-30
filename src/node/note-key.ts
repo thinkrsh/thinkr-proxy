@@ -1,12 +1,12 @@
 // The public keys of the notes on Node: the key of top-ups from the PEM that scripts/chat/deploy.sh
-// keys derives from the key of the issuer, and the holder keys of each month from the JSON that
-// `npm run holder-keys -- public` of apps/issuer prints. Each checks an unblinded note as RSA-PSS
-// with SHA-384 (RFC 9474).
+// keys derives from the key of the issuer, and the holder keys of each month and the keys of the
+// notes of change from the JSON that `npm run holder-keys -- public` and `npm run change-keys --
+// public` of apps/issuer print. Each checks an unblinded note as RSA-PSS with SHA-384 (RFC 9474).
 import { constants, createHash, createPublicKey, verify, type KeyObject } from 'node:crypto';
 
 import { z } from 'zod';
 
-import { NOTE_SIGNATURE } from '../config/credit.js';
+import { CHANGE_CENTS, NOTE_SIGNATURE } from '../config/credit.js';
 import type { NoteKey } from '../credit/note-key.js';
 import { fromBase64Url } from '../lib/bytes.js';
 
@@ -33,6 +33,25 @@ export function holderKeysFromJson(json: string): Map<string, NoteKey> {
         createPublicKey({ key: Buffer.from(fromBase64Url(spki)), format: 'der', type: 'spki' }),
       ),
     ]),
+  );
+}
+
+/** Reads the keys of the notes of change from `{ "10": "<SPKI DER in base64url>" }`. */
+export function changeKeysFromJson(json: string): Map<number, NoteKey> {
+  const entries = z
+    .record(z.string(), z.string().regex(/^[A-Za-z0-9_-]+$/))
+    .parse(JSON.parse(json));
+  return new Map(
+    CHANGE_CENTS.map((cents) => {
+      const spki = entries[String(cents)];
+      if (spki === undefined) throw new Error(`The file of change keys lacks ${String(cents)}.`);
+      return [
+        cents,
+        noteKeyOf(
+          createPublicKey({ key: Buffer.from(fromBase64Url(spki)), format: 'der', type: 'spki' }),
+        ),
+      ];
+    }),
   );
 }
 

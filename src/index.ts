@@ -20,12 +20,15 @@ import { nodeForward } from './node/forward.js';
 import { openLedger } from './node/ledger.js';
 import { openSyncStore } from './node/sync-store.js';
 import { noteKeysOf } from './credit/note-key.js';
-import { holderKeysFromJson, noteKeyFromPublicPem } from './node/note-key.js';
+import { changeKeysFromJson, holderKeysFromJson, noteKeyFromPublicPem } from './node/note-key.js';
 
 const env = readEnv(process.env);
 const noteKeys = noteKeysOf(
   noteKeyFromPublicPem(readFileSync(env.notePublicKeyFile, 'utf8')),
   holderKeysFromJson(readFileSync(env.holderPublicKeysFile, 'utf8')),
+  env.changePublicKeysFile === null
+    ? new Map()
+    : changeKeysFromJson(readFileSync(env.changePublicKeysFile, 'utf8')),
 );
 const ticketKey = readTicketKey(env.ticketKeyFile);
 const ledger = openLedger(env.databaseFile);

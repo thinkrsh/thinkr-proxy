@@ -330,6 +330,8 @@ export interface CreditKeyResponse {
    * vouchers is worth (decision 189), so that the app counts the credit of each voucher it holds.
    */
   holderKeys: { keyId: string; month: string; voucherUsd: number }[];
+  /** The keys of the notes of change, with what one note is worth, for the same count. */
+  changeKeys: { keyId: string; voucherUsd: number }[];
 }
 
 /** POST /api/credit/redeem: one voucher, spent into a balance. */

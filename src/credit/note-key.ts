@@ -3,8 +3,9 @@
 // device, the issuer (apps/issuer/) signs it without seeing it, and the proxy checks the unblinded
 // note. Since 24 Oct 2026 the proxy holds the public key only, so it cannot sign a note. The
 // Node entry implements it in node/note-key.ts. Holder vouchers (decision 189) come from a key
-// of their own for each month, and are worth less than the note of a top-up.
-import { CREDIT } from '../config/credit.js';
+// of their own for each month, and are worth less than the note of a top-up. The notes of change of
+// a top-up in a privacy coin (31 Oct 2026) come from a key for each kind, and count as a top-up.
+import { CENTS_PER_USD, CREDIT } from '../config/credit.js';
 
 export interface NoteKey {
   /** The first bytes of the SHA-256 of the public key, in hex. */
@@ -31,9 +32,15 @@ export interface NoteKeys {
   find: (keyId: string) => KnownKey | null;
   /** The keys of holder vouchers, the oldest month first. */
   holder: readonly KnownKey[];
+  /** The keys of the notes of change, the dearest first. */
+  change: readonly KnownKey[];
 }
 
-export function noteKeysOf(topUp: NoteKey, holderKeys: ReadonlyMap<string, NoteKey>): NoteKeys {
+export function noteKeysOf(
+  topUp: NoteKey,
+  holderKeys: ReadonlyMap<string, NoteKey>,
+  changeKeys: ReadonlyMap<number, NoteKey> = new Map(),
+): NoteKeys {
   const known = new Map<string, KnownKey>([
     [topUp.keyId, { key: topUp, usd: CREDIT.voucherUsd, holderMonth: null }],
   ]);
@@ -43,5 +50,9 @@ export function noteKeysOf(topUp: NoteKey, holderKeys: ReadonlyMap<string, NoteK
   const holder = [...known.values()]
     .filter((key) => key.holderMonth !== null)
     .sort((left, right) => (left.holderMonth ?? '').localeCompare(right.holderMonth ?? ''));
-  return { topUp, find: (keyId) => known.get(keyId) ?? null, holder };
+  const change: KnownKey[] = [...changeKeys]
+    .sort(([left], [right]) => right - left)
+    .map(([cents, key]) => ({ key, usd: cents / CENTS_PER_USD, holderMonth: null }));
+  for (const one of change) known.set(one.key.keyId, one);
+  return { topUp, find: (keyId) => known.get(keyId) ?? null, holder, change };
 }

@@ -21,6 +21,7 @@ describe('readEnv', () => {
       clientAddressHeader: null,
       notePublicKeyFile: '../../secret/voucher-dev-public.pem',
       holderPublicKeysFile: '../../secret/holder-public-keys-dev.json',
+      changePublicKeysFile: null,
       ticketKeyFile: '../../secret/ticket-key-dev.txt',
       databaseFile: '.data/ledger.db',
       publicOrigin: null,

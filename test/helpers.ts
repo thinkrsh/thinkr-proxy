@@ -48,9 +48,12 @@ function testKey(): NoteKey {
 export const TEST_NOTE_KEY = testKey();
 export const TEST_HOLDER_MONTH = '2026-10';
 export const TEST_HOLDER_KEY = testKey();
+/** The key of the notes of 10 cents of the tests. */
+export const TEST_CHANGE_KEY = testKey();
 export const TEST_NOTE_KEYS = noteKeysOf(
   TEST_NOTE_KEY,
   new Map([[TEST_HOLDER_MONTH, TEST_HOLDER_KEY]]),
+  new Map([[10, TEST_CHANGE_KEY]]),
 );
 
 /** Signs one blinded note with a key, as the issuer does (apps/issuer/src/node/note-key.ts). */
@@ -168,6 +171,7 @@ export function createTestApp(
       clientAddressHeader: null,
       notePublicKeyFile: 'unused-in-tests.pem',
       holderPublicKeysFile: 'unused-in-tests.json',
+      changePublicKeysFile: null,
       ticketKeyFile: 'unused-in-tests.txt',
       databaseFile: ':memory:',
       publicOrigin: options.publicOrigin === undefined ? TEST_PUBLIC_ORIGIN : options.publicOrigin,

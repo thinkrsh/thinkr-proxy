@@ -49,6 +49,10 @@ export function createCreditRoute(deps: CreditRouteDeps): Hono {
       month: known.holderMonth ?? '',
       voucherUsd: known.usd,
     })),
+    changeKeys: deps.noteKeys.change.map((known) => ({
+      keyId: known.key.keyId,
+      voucherUsd: known.usd,
+    })),
   };
 
   return new Hono()

@@ -9,11 +9,14 @@ import type {
   RedeemResponse,
 } from '../src/contract.js';
 import { newBalanceSecret } from '../src/credit/balance.js';
-import { fromBase64Url } from '../src/lib/bytes.js';
+import { noteKeysOf } from '../src/credit/note-key.js';
+import { fromBase64Url, toBase64Url } from '../src/lib/bytes.js';
+import { changeKeysFromJson } from '../src/node/note-key.js';
 import {
   balanceHeader,
   createTestApp,
   issuerBlindSign,
+  TEST_CHANGE_KEY,
   TEST_HOLDER_KEY,
   TEST_HOLDER_MONTH,
   TEST_NOTE_KEY,
@@ -91,6 +94,7 @@ describe('GET /api/credit/key', () => {
           voucherUsd: CREDIT.holderVoucherUsd,
         },
       ],
+      changeKeys: [{ keyId: TEST_CHANGE_KEY.keyId, voucherUsd: 0.1 }],
     });
     expect(fromBase64Url(body.publicKey)).toEqual(KEY.publicKey);
   });
@@ -113,6 +117,26 @@ describe('POST /api/credit/redeem', () => {
     const second = await redeem(app, redeemBody(KEY, await signedNote(KEY), secret));
     expect((await second.json()) as RedeemResponse).toEqual({ usd: 2 });
     expect(await creditOf(app, secret)).toEqual({ usd: 2 });
+  });
+
+  it('adds what a note of change is worth, once (31 Oct 2026)', async () => {
+    const { app } = createTestApp();
+    const secret = newBalanceSecret();
+    const note = await signedNote(TEST_CHANGE_KEY);
+    const first = await redeem(app, redeemBody(TEST_CHANGE_KEY, note, secret));
+    expect((await first.json()) as RedeemResponse).toEqual({ usd: 0.1 });
+    const again = await redeem(app, redeemBody(TEST_CHANGE_KEY, note, secret));
+    expect(await errorCode(again)).toBe('voucher_spent');
+    expect(await creditOf(app, secret)).toEqual({ usd: 0.1 });
+  });
+
+  it('counts a note of change as a top-up, not as a holder voucher', async () => {
+    const { app, ledger } = createTestApp();
+    await redeem(
+      app,
+      redeemBody(TEST_CHANGE_KEY, await signedNote(TEST_CHANGE_KEY), newBalanceSecret()),
+    );
+    expect([...ledger.holderTotals().redeemed]).toEqual([]);
   });
 
   it('spends a voucher once, and a lost answer loses no credit', async () => {
@@ -158,5 +182,25 @@ describe('GET /api/access with a balance', () => {
     });
     expect(response.status).toBe(401);
     expect(await errorCode(response)).toBe('balance_unknown');
+  });
+});
+
+describe('the keys of the notes of change on Node (31 Oct 2026)', () => {
+  const spki = toBase64Url(TEST_CHANGE_KEY.publicKey);
+
+  it('reads one key for each kind', () => {
+    const keys = changeKeysFromJson(JSON.stringify({ 10: spki, 1: spki }));
+    expect([...keys.keys()]).toEqual([10, 1]);
+    expect(keys.get(10)?.keyId).toBe(TEST_CHANGE_KEY.keyId);
+  });
+
+  it('stops when a kind is missing', () => {
+    expect(() => changeKeysFromJson(JSON.stringify({ 10: spki }))).toThrow(/lacks 1/);
+  });
+
+  it('takes no note of change while no file names their keys', () => {
+    const keys = noteKeysOf(KEY, new Map([[TEST_HOLDER_MONTH, TEST_HOLDER_KEY]]));
+    expect(keys.change).toEqual([]);
+    expect(keys.find(TEST_CHANGE_KEY.keyId)).toBeNull();
   });
 });

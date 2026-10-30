@@ -3,6 +3,15 @@
 // or else at cost plus 25%. Change the numbers here only, except the worth of a note, the packs,
 // and the cap of a top-up, which the issuer signs by (apps/issuer/src/config/credit.ts) and must
 // match there.
+/** Cents in a dollar. */
+export const CENTS_PER_USD = 100;
+
+/**
+ * The notes of change of a top-up in a privacy coin, by the cents that one of them holds. Must match
+ * CHANGE_CENTS in apps/issuer.
+ */
+export const CHANGE_CENTS = [10, 1] as const;
+
 export const CREDIT = {
   /** The value of one note in USD (docs/CONCEPT.md, section "Blind vouchers"). */
   voucherUsd: 1,

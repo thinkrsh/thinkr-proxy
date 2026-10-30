@@ -4,18 +4,20 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { findTeeModel } from '../src/catalog.js';
 import { INFERENCE } from '../src/config/inference.js';
+import { MESSAGES } from '../src/config/messages.js';
 import { TINFOIL } from '../src/config/tinfoil.js';
 import type { ErrorBody } from '../src/contract.js';
 import { balanceHash, newBalanceSecret, usdToMicros, userPricing } from '../src/credit/balance.js';
 import type { Ledger } from '../src/credit/ledger.js';
 import type {
+  EncodedChatAnswer,
   InferenceModelsResponse,
   KeyBalanceResponse,
   KeyCloseResponse,
   KeyFillResponse,
   KeyRedeemResponse,
 } from '../src/inference/contract.js';
-import { toBase64Url } from '../src/lib/bytes.js';
+import { fromBase64Url, toBase64Url } from '../src/lib/bytes.js';
 import { tokensUsd } from '../src/lib/cost.js';
 import {
   TEST_HOLDER_KEY,
@@ -306,6 +308,92 @@ describe('POST /api/inference/v1/keys/redeem', () => {
     });
     expect(response.status).toBe(400);
     expect((await errorOf(response)).message).toBe(INFERENCE.messages.keyRequired);
+  });
+});
+
+describe('an encrypted chat sent as text (30 Oct 2026)', () => {
+  const FRAMES = new Uint8Array([0, 0, 0, 3, 7, 8, 9]);
+
+  function postEncoded(
+    app: TestApp['app'],
+    headers: Record<string, string>,
+    body: string = toBase64Url(FRAMES),
+  ): Promise<Response> {
+    return Promise.resolve(
+      app.request(CHAT_ROUTE, {
+        method: 'POST',
+        headers: {
+          ...SEALED_HEADERS,
+          [INFERENCE.bodyEncodingHeader]: INFERENCE.bodyEncoding,
+          ...headers,
+        },
+        body,
+      }),
+    );
+  }
+
+  it('sends the frames to the enclave, and answers with the whole encrypted answer', async () => {
+    const testApp = appAnswering();
+    const key = await keyWith(testApp.ledger, 1, 'top-up');
+    const response = await postEncoded(testApp.app, bearer(key));
+    expect(response.status).toBe(200);
+    const answer = (await response.json()) as EncodedChatAnswer;
+    expect(answer.nonce).toBe('cd'.repeat(32));
+    expect(new TextDecoder().decode(fromBase64Url(answer.ciphertext))).toBe('sealed-1sealed-2');
+    const sent = upstreamCall(testApp.fetchMock).init.body as ArrayBuffer;
+    expect(new Uint8Array(sent)).toEqual(FRAMES);
+    await vi.waitFor(async () => {
+      expect(await keyMicros(testApp, key)).toBe(usdToMicros(1) - chatMicros());
+    });
+  });
+
+  it('takes spaces around the text, as a paste brings them', async () => {
+    const testApp = appAnswering();
+    const key = await keyWith(testApp.ledger, 1, 'top-up');
+    const response = await postEncoded(testApp.app, bearer(key), `\n${toBase64Url(FRAMES)} \n`);
+    expect(response.status).toBe(200);
+  });
+
+  it.each([
+    [
+      'another encoding',
+      { [INFERENCE.bodyEncodingHeader]: 'hex' },
+      INFERENCE.messages.encodingUnknown,
+    ],
+    ['no key of EHBP', { [TINFOIL.headers.encapsulatedKey]: 'not hex' }, MESSAGES.notSealed],
+  ])('refuses %s, and sends nothing', async (_name, headers, message) => {
+    const testApp = appAnswering();
+    const key = await keyWith(testApp.ledger, 1, 'top-up');
+    const response = await postEncoded(testApp.app, { ...bearer(key), ...headers });
+    expect(response.status).toBe(400);
+    expect((await errorOf(response)).message).toBe(message);
+    expect(testApp.fetchMock).not.toHaveBeenCalled();
+    expect(await keyMicros(testApp, key)).toBe(usdToMicros(1));
+  });
+
+  it.each(['', 'not base64!', '{"model":"gpt-oss-120b"}'])('refuses the body %j', async (body) => {
+    const testApp = appAnswering();
+    const key = await keyWith(testApp.ledger, 1, 'top-up');
+    const response = await postEncoded(testApp.app, bearer(key), body);
+    expect(response.status).toBe(400);
+    expect((await errorOf(response)).message).toBe(INFERENCE.messages.encodedBodyInvalid);
+    expect(testApp.fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('asks for a key and credit as any chat does', async () => {
+    const testApp = appAnswering();
+    const none = await postEncoded(testApp.app, {});
+    expect(none.status).toBe(401);
+    expect(testApp.fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('leaves an error of the enclave as it is, and costs nothing', async () => {
+    const testApp = appAnswering(() => new Response('busy', { status: 503 }));
+    const key = await keyWith(testApp.ledger, 1, 'top-up');
+    const response = await postEncoded(testApp.app, bearer(key));
+    expect(response.ok).toBe(false);
+    await response.text();
+    expect(await keyMicros(testApp, key)).toBe(usdToMicros(1));
   });
 });
 

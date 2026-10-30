@@ -34,6 +34,13 @@ export const INFERENCE = {
    * code calls more often than one person types (a choice of 29 Oct 2026, not a measurement).
    */
   requestsPerWindow: 60,
+  /**
+   * A caller that cannot send raw bytes, such as Postman (the owner, 30 Oct 2026), names this
+   * encoding on an encrypted chat. The proxy decodes the text back to the encrypted frames, and
+   * answers with the encrypted answer in the same encoding; it never opens either.
+   */
+  bodyEncodingHeader: 'X-Thinkr-Body-Encoding',
+  bodyEncoding: 'base64url',
   /** The most holder vouchers that one call spends into a key; more go in several calls. */
   maxVouchersPerRedeem: 100,
   keysPageUrl: KEYS_PAGE_URL,
@@ -45,5 +52,7 @@ export const INFERENCE = {
     keyIsBalance: 'An API key cannot take credit from itself.',
     balanceUnknown: 'This balance holds no credit yet.',
     fillLow: 'Your balance has too little credit for this limit.',
+    encodingUnknown: 'X-Thinkr-Body-Encoding takes only base64url.',
+    encodedBodyInvalid: 'The body is not valid base64url.',
   },
 } as const;

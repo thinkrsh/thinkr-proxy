@@ -5,7 +5,8 @@
 // router on, GET /v1/balance tells the credit of a key, POST /v1/keys/fill moves credit onto a key
 // from the balance of the app (the owner, 30 Oct 2026), POST /v1/keys/close stops a key and moves
 // what is left back, POST /v1/keys/redeem spends holder vouchers into a key for the dashboard, and
-// POST /v1/chat/completions forwards a sealed chat. A move names the balance and the key in one
+// POST /v1/chat/completions forwards a sealed chat, as raw frames or in the text encoding of
+// INFERENCE.bodyEncoding, for a caller such as Postman. A move names the balance and the key in one
 // request, and the ledger and the log keep neither beside the other.
 import { Hono, type Context } from 'hono';
 
@@ -23,6 +24,7 @@ import {
   keyCloseRequestSchema,
   keyFillRequestSchema,
   keyRedeemRequestSchema,
+  type EncodedChatAnswer,
   type InferenceModel,
   type InferenceModelsResponse,
   type KeyBalanceResponse,
@@ -31,6 +33,7 @@ import {
   type KeyRedeemResponse,
 } from '../inference/contract.js';
 import { parseBody, readJson } from '../lib/body.js';
+import { fromBase64Url, toBase64Url } from '../lib/bytes.js';
 import { ProxyError } from '../lib/errors.js';
 import { fetchAttestation } from '../tinfoil/attestation.js';
 import { forwardSealedChat, sealedChatLimit, type PrivateRouteDeps } from './private.js';
@@ -40,6 +43,8 @@ export interface InferenceRouteDeps extends PrivateRouteDeps {
   /** The public keys of the issuer, which check the holder vouchers that fill a key. */
   readonly noteKeys: NoteKeys;
 }
+
+const BASE64URL = /^[A-Za-z0-9_-]+$/;
 
 /** A model of the private lane that Inference serves: one that takes a chat, with its enclave. */
 type ServedModel = CatalogModel & { readonly info: { readonly teeModelId: string } };
@@ -66,11 +71,13 @@ export function createInferenceRoute(deps: InferenceRouteDeps): Hono {
     .post(INFERENCE.fillPath, async (c) => c.json<KeyFillResponse>(await fillKey(deps, c)))
     .post(INFERENCE.closePath, async (c) => c.json<KeyCloseResponse>(await closeKey(deps, c)))
     .post(TINFOIL.chatCompletionsPath, sealedChatLimit(), async (c) => {
+      const encoded = await decodeBody(c);
       try {
-        return await forwardSealedChat(deps, c, async (visitor) => ({
+        const answer = await forwardSealedChat(deps, c, async (visitor) => ({
           visitor,
           balance: await keyBalance(deps.ledger, c),
         }));
+        return encoded ? await encodedAnswer(answer) : answer;
       } catch (error) {
         // The gate tells a chat to top up, which an API key never does.
         if (error instanceof ProxyError && error.code === 'balance_low') {
@@ -79,6 +86,36 @@ export function createInferenceRoute(deps: InferenceRouteDeps): Hono {
         throw error;
       }
     });
+}
+
+/**
+ * Puts the encrypted frames of a body sent as text in place of that text, and tells whether it did.
+ * The frames stay encrypted, so this reads nothing of the chat.
+ */
+async function decodeBody(c: Context): Promise<boolean> {
+  const encoding = c.req.header(INFERENCE.bodyEncodingHeader);
+  if (encoding === undefined) return false;
+  if (encoding !== INFERENCE.bodyEncoding) {
+    throw new ProxyError('invalid_request', INFERENCE.messages.encodingUnknown);
+  }
+  const text = (await c.req.raw.text()).trim();
+  if (!BASE64URL.test(text)) {
+    throw new ProxyError('invalid_request', INFERENCE.messages.encodedBodyInvalid);
+  }
+  c.req.raw = new Request(c.req.raw, { body: new Uint8Array(fromBase64Url(text)) });
+  return true;
+}
+
+/**
+ * The whole encrypted answer as text, with its nonce. An error comes with no frames and stays as it
+ * is. Reading the answer to its end is what lets the chat be paid, as a stream does.
+ */
+async function encodedAnswer(answer: Response): Promise<Response> {
+  if (!answer.ok) return answer;
+  const nonce = answer.headers.get(TINFOIL.headers.responseNonce);
+  if (nonce === null) throw new ProxyError('upstream_error', MESSAGES.upstreamUnreadable);
+  const ciphertext = toBase64Url(new Uint8Array(await answer.arrayBuffer()));
+  return Response.json({ nonce, ciphertext } satisfies EncodedChatAnswer);
 }
 
 /**

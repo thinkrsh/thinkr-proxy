@@ -64,6 +64,17 @@ export interface KeyCloseResponse {
   usd: number;
 }
 
+/**
+ * The answer to an encrypted chat sent with X-Thinkr-Body-Encoding. The caller decrypts it on its
+ * own machine, as the local bridge of the SDK does.
+ */
+export interface EncodedChatAnswer {
+  /** The response nonce of EHBP, which an answer in frames carries in a header. */
+  nonce: string;
+  /** The encrypted frames of the answer, in base64url. */
+  ciphertext: string;
+}
+
 /** GET /api/inference/v1/balance: the credit left on the key of the request, in USD. */
 export interface KeyBalanceResponse {
   usd: number;

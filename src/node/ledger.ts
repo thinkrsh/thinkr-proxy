@@ -11,6 +11,7 @@ import type {
   HolderTotals,
   Ledger,
   MergeResult,
+  MoveResult,
   RedeemResult,
 } from '../credit/ledger.js';
 
@@ -26,6 +27,9 @@ const SCHEMA = `
   ) STRICT;
   CREATE TABLE IF NOT EXISTS settled_jobs (
     job_hash TEXT PRIMARY KEY
+  ) STRICT;
+  CREATE TABLE IF NOT EXISTS credit_moves (
+    move_hash TEXT PRIMARY KEY
   ) STRICT;
   CREATE TABLE IF NOT EXISTS holder_balances (
     balance_hash TEXT PRIMARY KEY,
@@ -61,6 +65,7 @@ export function openLedger(file: string): Ledger {
   );
   const closeBalance = db.prepare('DELETE FROM balances WHERE balance_hash = ?');
   const insertSettledJob = db.prepare('INSERT OR IGNORE INTO settled_jobs (job_hash) VALUES (?)');
+  const insertMove = db.prepare('INSERT OR IGNORE INTO credit_moves (move_hash) VALUES (?)');
   const selectHolder = db.prepare('SELECT micros FROM holder_balances WHERE balance_hash = ?');
   const fillHolder = db.prepare(
     'INSERT INTO holder_balances (balance_hash, micros) VALUES (?, ?) ' +
@@ -121,13 +126,6 @@ export function openLedger(file: string): Ledger {
       );
     },
     balance,
-    holderBalance(balanceHash) {
-      const total = balance(balanceHash);
-      if (total === null) return null;
-      const holder = selectHolder.get(balanceHash)?.micros;
-      // A balance in debt has no holder credit left, whatever its holder part says.
-      return typeof holder === 'number' ? Math.min(holder, total) : 0;
-    },
     charge(balanceHash, micros, use, at) {
       transaction(
         () => {
@@ -147,6 +145,27 @@ export function openLedger(file: string): Ledger {
           if (typeof holder === 'number') {
             fillHolder.run(intoHash, holder);
             closeHolder.run(fromHash);
+          }
+          return 'ok';
+        },
+        (result) => result === 'ok',
+      );
+    },
+    moveCredit(moveHash, fromHash, intoHash, micros): MoveResult {
+      return transaction(
+        (): MoveResult => {
+          // First, since a move that went through may have left too little for a second one.
+          if (insertMove.run(moveHash).changes === 0) return 'repeat';
+          const left = balance(fromHash);
+          if (left === null) return 'unknown';
+          if (left < micros) return 'low';
+          chargeBalance.run(micros, fromHash);
+          fillBalance.run(intoHash, micros);
+          const holder = selectHolder.get(fromHash)?.micros;
+          const fromHolder = typeof holder === 'number' ? Math.min(Math.max(holder, 0), micros) : 0;
+          if (fromHolder > 0) {
+            fillHolder.run(fromHash, -fromHolder);
+            fillHolder.run(intoHash, fromHolder);
           }
           return 'ok';
         },

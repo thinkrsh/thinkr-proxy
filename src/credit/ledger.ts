@@ -28,6 +28,12 @@ export type RedeemResult = 'ok' | 'spent';
 /** 'unknown': the balance to close does not exist, so nothing moved. */
 export type MergeResult = 'ok' | 'unknown';
 
+/**
+ * 'repeat': this move went through before, so nothing moved again. 'unknown': the balance that
+ * pays does not exist. 'low': it holds too little. Nothing moved in any of the three.
+ */
+export type MoveResult = 'ok' | 'repeat' | 'unknown' | 'low';
+
 export interface Ledger {
   /**
    * Spends a note into a balance in one step, and opens the balance when it is new. Nothing
@@ -43,11 +49,6 @@ export interface Ledger {
   /** What is left on a balance, in millionths of a dollar, or null when there is no such balance. */
   balance: (balanceHash: string) => number | null;
   /**
-   * The part of what is left on a balance that holder vouchers paid for, in millionths of a dollar,
-   * or null when there is no such balance. Inference spends this part alone (29 Oct 2026).
-   */
-  holderBalance: (balanceHash: string) => number | null;
-  /**
    * Takes the price of a chat, an image, or a video from a balance, at `at`. The balance may end
    * below zero by that one request. The credit of holder vouchers goes first.
    */
@@ -57,6 +58,12 @@ export interface Ledger {
    * first, in one step. A balance below zero moves its debt along.
    */
   mergeBalance: (fromHash: string, intoHash: string) => MergeResult;
+  /**
+   * Moves `micros` from one balance onto another, which opens when it is new, in one step (30 Oct
+   * 2026), the credit of holder vouchers first, as a charge takes it. `moveHash` names the move, so
+   * a call whose answer was lost can run again. It keeps the hash alone, never the two balances.
+   */
+  moveCredit: (moveHash: string, fromHash: string, intoHash: string, micros: number) => MoveResult;
   /**
    * Settles a video job that a balance paid ahead (the owner, 23 Oct 2026), once: records the hash
    * of the job, and gives `refundMicros` back to the balance (less than zero takes more). False when

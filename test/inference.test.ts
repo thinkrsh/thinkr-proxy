@@ -11,6 +11,8 @@ import type { Ledger } from '../src/credit/ledger.js';
 import type {
   InferenceModelsResponse,
   KeyBalanceResponse,
+  KeyCloseResponse,
+  KeyFillResponse,
   KeyRedeemResponse,
 } from '../src/inference/contract.js';
 import { toBase64Url } from '../src/lib/bytes.js';
@@ -31,6 +33,8 @@ const BASE = '/api/inference';
 const CHAT_ROUTE = `${BASE}${TINFOIL.chatCompletionsPath}`;
 const REDEEM_ROUTE = `${BASE}${INFERENCE.redeemPath}`;
 const BALANCE_ROUTE = `${BASE}${INFERENCE.balancePath}`;
+const FILL_ROUTE = `${BASE}${INFERENCE.fillPath}`;
+const CLOSE_ROUTE = `${BASE}${INFERENCE.closePath}`;
 const MODEL = 'gpt-oss-120b';
 const USAGE = { inputTokens: 1_000, outputTokens: 500 };
 
@@ -92,8 +96,8 @@ async function errorOf(response: Response): Promise<ErrorBody['error']> {
   return ((await response.json()) as ErrorBody).error;
 }
 
-async function holderMicros(testApp: TestApp, key: string): Promise<number | null> {
-  return testApp.ledger.holderBalance(await balanceHash(key.slice(INFERENCE.keyPrefix.length)));
+async function keyMicros(testApp: TestApp, key: string): Promise<number | null> {
+  return testApp.ledger.balance(await balanceHash(key.slice(INFERENCE.keyPrefix.length)));
 }
 
 /** The price of one chat of `USAGE` with the model, in millionths of a dollar. */
@@ -113,14 +117,34 @@ async function noteFields(key: typeof TEST_HOLDER_KEY) {
   };
 }
 
-function redeem(app: TestApp['app'], body: unknown): Promise<Response> {
+function post(app: TestApp['app'], route: string, body: unknown): Promise<Response> {
   return Promise.resolve(
-    app.request(REDEEM_ROUTE, {
+    app.request(route, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     }),
   );
+}
+
+function redeem(app: TestApp['app'], body: unknown): Promise<Response> {
+  return post(app, REDEEM_ROUTE, body);
+}
+
+/** The secret of a new balance of the app that holds this much. */
+async function balanceWith(
+  ledger: Ledger,
+  usd: number,
+  from: 'holder' | 'top-up',
+): Promise<string> {
+  const secret = newBalanceSecret();
+  const month = from === 'holder' ? TEST_HOLDER_MONTH : null;
+  ledger.redeem(randomUUID(), await balanceHash(secret), usdToMicros(usd), month);
+  return secret;
+}
+
+function newKey(): string {
+  return `${INFERENCE.keyPrefix}${newBalanceSecret()}`;
 }
 
 describe('GET /api/inference/v1/models', () => {
@@ -153,7 +177,7 @@ describe('GET /api/inference/v1/attestation', () => {
 });
 
 describe('POST /api/inference/v1/chat/completions', () => {
-  it('forwards a sealed chat and pays it from the holder credit of the key', async () => {
+  it('forwards a sealed chat and pays it from the credit of the key', async () => {
     const testApp = appAnswering();
     const key = await keyWith(testApp.ledger, 1, 'holder');
     const response = await postSealed(testApp.app, bearer(key));
@@ -164,7 +188,7 @@ describe('POST /api/inference/v1/chat/completions', () => {
     expect(headers.get('Authorization')).toBe(`Bearer ${TEST_TINFOIL_KEY}`);
     expect(headers.get(TINFOIL.headers.model)).toBe(MODEL);
     await vi.waitFor(async () => {
-      expect(await holderMicros(testApp, key)).toBe(usdToMicros(1) - chatMicros());
+      expect(await keyMicros(testApp, key)).toBe(usdToMicros(1) - chatMicros());
     });
   });
 
@@ -193,9 +217,26 @@ describe('POST /api/inference/v1/chat/completions', () => {
     expect((await errorOf(response)).message).toBe(INFERENCE.messages.keyRequired);
   });
 
-  it('never spends the credit of a top-up', async () => {
+  it('spends the credit of a top-up too', async () => {
     const testApp = appAnswering();
     const key = await keyWith(testApp.ledger, 5, 'top-up');
+    const response = await postSealed(testApp.app, bearer(key));
+    expect(response.status).toBe(200);
+    await response.text();
+    await vi.waitFor(async () => {
+      expect(await keyMicros(testApp, key)).toBe(usdToMicros(5) - chatMicros());
+    });
+  });
+
+  it('refuses a chat once the credit of the key is gone', async () => {
+    const testApp = appAnswering();
+    const key = await keyWith(testApp.ledger, 1, 'top-up');
+    testApp.ledger.charge(
+      await balanceHash(key.slice(INFERENCE.keyPrefix.length)),
+      usdToMicros(1),
+      'chat',
+      Date.now(),
+    );
     const response = await postSealed(testApp.app, bearer(key));
     expect(response.status).toBe(402);
     expect(await errorOf(response)).toEqual({
@@ -211,7 +252,7 @@ describe('POST /api/inference/v1/chat/completions', () => {
     const response = await postSealed(testApp.app, bearer(key));
     expect(response.ok).toBe(false);
     await response.text();
-    expect(await holderMicros(testApp, key)).toBe(usdToMicros(1));
+    expect(await keyMicros(testApp, key)).toBe(usdToMicros(1));
   });
 });
 
@@ -242,7 +283,7 @@ describe('POST /api/inference/v1/keys/redeem', () => {
       code: 'voucher_invalid',
       message: INFERENCE.messages.holderOnly,
     });
-    expect(await holderMicros(testApp, key)).toBeNull();
+    expect(await keyMicros(testApp, key)).toBeNull();
   });
 
   it('refuses a voucher whose signature does not hold', async () => {
@@ -268,8 +309,174 @@ describe('POST /api/inference/v1/keys/redeem', () => {
   });
 });
 
+describe('POST /api/inference/v1/keys/fill', () => {
+  it('moves dollars from the balance onto a new key, top-ups included', async () => {
+    const testApp = createTestApp();
+    const balance = await balanceWith(testApp.ledger, 40.95, 'top-up');
+    const key = newKey();
+    const response = await post(testApp.app, FILL_ROUTE, {
+      balance,
+      key,
+      usd: 5,
+      fill: newBalanceSecret(),
+    });
+    expect(response.status).toBe(200);
+    const filled = (await response.json()) as KeyFillResponse;
+    expect(filled.usd).toBe(5);
+    expect(filled.balance).toBeCloseTo(35.95, 6);
+    expect(await keyMicros(testApp, key)).toBe(usdToMicros(5));
+    expect(testApp.ledger.balance(await balanceHash(balance))).toBe(35_950_000);
+  });
+
+  it('moves nothing more when the same fill is sent again', async () => {
+    const testApp = createTestApp();
+    const balance = await balanceWith(testApp.ledger, 6, 'top-up');
+    const key = newKey();
+    const body = { balance, key, usd: 5, fill: newBalanceSecret() };
+    await post(testApp.app, FILL_ROUTE, body);
+    // The balance now holds too little for a second move, and the call still answers.
+    const again = await post(testApp.app, FILL_ROUTE, body);
+    expect(again.status).toBe(200);
+    expect((await again.json()) as KeyFillResponse).toEqual({ usd: 5, balance: 1 });
+  });
+
+  it('adds to a key that holds credit', async () => {
+    const testApp = createTestApp();
+    const balance = await balanceWith(testApp.ledger, 10, 'top-up');
+    const key = await keyWith(testApp.ledger, 1, 'holder');
+    const response = await post(testApp.app, FILL_ROUTE, {
+      balance,
+      key,
+      usd: 2.5,
+      fill: newBalanceSecret(),
+    });
+    expect(((await response.json()) as KeyFillResponse).usd).toBe(3.5);
+  });
+
+  it('refuses more than the balance holds, and the fill can run again with less', async () => {
+    const testApp = createTestApp();
+    const balance = await balanceWith(testApp.ledger, 1, 'top-up');
+    const key = newKey();
+    const fill = newBalanceSecret();
+    const response = await post(testApp.app, FILL_ROUTE, { balance, key, usd: 1.01, fill });
+    expect(response.status).toBe(402);
+    expect(await errorOf(response)).toEqual({
+      code: 'balance_low',
+      message: INFERENCE.messages.fillLow,
+    });
+    expect(await keyMicros(testApp, key)).toBeNull();
+    expect((await post(testApp.app, FILL_ROUTE, { balance, key, usd: 1, fill })).status).toBe(200);
+    expect(await keyMicros(testApp, key)).toBe(usdToMicros(1));
+  });
+
+  it('refuses a balance that does not exist', async () => {
+    const testApp = createTestApp();
+    const response = await post(testApp.app, FILL_ROUTE, {
+      balance: newBalanceSecret(),
+      key: newKey(),
+      usd: 1,
+      fill: newBalanceSecret(),
+    });
+    expect(response.status).toBe(401);
+    expect((await errorOf(response)).message).toBe(INFERENCE.messages.balanceUnknown);
+  });
+
+  it('refuses a key of another shape, and a key that is the balance itself', async () => {
+    const testApp = createTestApp();
+    const balance = await balanceWith(testApp.ledger, 5, 'top-up');
+    const fill = newBalanceSecret();
+    const bare = await post(testApp.app, FILL_ROUTE, {
+      balance,
+      key: newBalanceSecret(),
+      usd: 1,
+      fill,
+    });
+    expect(bare.status).toBe(400);
+    expect((await errorOf(bare)).message).toBe(INFERENCE.messages.keyRequired);
+    const same = await post(testApp.app, FILL_ROUTE, {
+      balance,
+      key: `${INFERENCE.keyPrefix}${balance}`,
+      usd: 1,
+      fill,
+    });
+    expect(same.status).toBe(400);
+    expect((await errorOf(same)).message).toBe(INFERENCE.messages.keyIsBalance);
+    expect(testApp.ledger.balance(await balanceHash(balance))).toBe(usdToMicros(5));
+  });
+
+  it.each([0, 0.001, -1, 2_000_000])('refuses an amount of %d', async (usd) => {
+    const testApp = createTestApp();
+    const balance = await balanceWith(testApp.ledger, 5, 'top-up');
+    const response = await post(testApp.app, FILL_ROUTE, {
+      balance,
+      key: newKey(),
+      usd,
+      fill: newBalanceSecret(),
+    });
+    expect(response.status).toBe(400);
+    expect(testApp.ledger.balance(await balanceHash(balance))).toBe(usdToMicros(5));
+  });
+
+  it('moves the credit of holder vouchers first, as a charge takes it', async () => {
+    const testApp = createTestApp();
+    const { ledger } = testApp;
+    const balance = await balanceWith(ledger, 2, 'top-up');
+    const from = await balanceHash(balance);
+    ledger.redeem(randomUUID(), from, usdToMicros(1), TEST_HOLDER_MONTH);
+    const key = newKey();
+    await post(testApp.app, FILL_ROUTE, { balance, key, usd: 1.5, fill: newBalanceSecret() });
+    const at = Date.UTC(2026, 9, 30);
+    // What stayed on the balance came from the top-up, so its use counts no holder credit.
+    ledger.charge(from, usdToMicros(1), 'chat', at);
+    expect(ledger.holderTotals().spent).toEqual([]);
+    ledger.charge(
+      await balanceHash(key.slice(INFERENCE.keyPrefix.length)),
+      usdToMicros(1.5),
+      'chat',
+      at,
+    );
+    expect(ledger.holderTotals().spent).toEqual([
+      { month: '2026-10', use: 'chat', micros: usdToMicros(1) },
+    ]);
+  });
+});
+
+describe('POST /api/inference/v1/keys/close', () => {
+  it('moves what is left back to the balance, and the key stops', async () => {
+    const testApp = appAnswering();
+    const balance = await balanceWith(testApp.ledger, 10, 'top-up');
+    const key = newKey();
+    await post(testApp.app, FILL_ROUTE, { balance, key, usd: 4, fill: newBalanceSecret() });
+    const response = await post(testApp.app, CLOSE_ROUTE, { balance, key });
+    expect(response.status).toBe(200);
+    expect(((await response.json()) as KeyCloseResponse).usd).toBe(10);
+    expect(await keyMicros(testApp, key)).toBeNull();
+    const chat = await postSealed(testApp.app, bearer(key));
+    expect(chat.status).toBe(401);
+    expect(testApp.fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('refuses a key that holds nothing, and a call sent again', async () => {
+    const testApp = createTestApp();
+    const balance = await balanceWith(testApp.ledger, 1, 'top-up');
+    const key = await keyWith(testApp.ledger, 1, 'top-up');
+    expect((await post(testApp.app, CLOSE_ROUTE, { balance, key })).status).toBe(200);
+    const again = await post(testApp.app, CLOSE_ROUTE, { balance, key });
+    expect(again.status).toBe(401);
+    expect((await errorOf(again)).message).toBe(INFERENCE.messages.keyUnknown);
+    expect(testApp.ledger.balance(await balanceHash(balance))).toBe(usdToMicros(2));
+  });
+
+  it('refuses a key of another shape', async () => {
+    const testApp = createTestApp();
+    const balance = await balanceWith(testApp.ledger, 1, 'top-up');
+    const response = await post(testApp.app, CLOSE_ROUTE, { balance, key: newBalanceSecret() });
+    expect(response.status).toBe(400);
+  });
+});
+
 describe('GET /api/inference/v1/balance', () => {
-  it('tells the holder credit of a key', async () => {
+  it('tells the credit of a key', async () => {
     const testApp = createTestApp();
     const key = await keyWith(testApp.ledger, 1.2, 'holder');
     const response = await testApp.app.request(BALANCE_ROUTE, { headers: bearer(key) });
@@ -284,18 +491,5 @@ describe('GET /api/inference/v1/balance', () => {
       headers: { Authorization: `bearer ${key}` },
     });
     expect(response.status).toBe(200);
-  });
-});
-
-describe('the holder part of a balance', () => {
-  it('leaves out the credit of top-ups and a debt', async () => {
-    const { ledger } = createTestApp();
-    const hash = await balanceHash(newBalanceSecret());
-    ledger.redeem(randomUUID(), hash, usdToMicros(2), null);
-    ledger.redeem(randomUUID(), hash, usdToMicros(1), TEST_HOLDER_MONTH);
-    expect(ledger.holderBalance(hash)).toBe(usdToMicros(1));
-    ledger.charge(hash, usdToMicros(4), 'chat', Date.now());
-    expect(ledger.holderBalance(hash)).toBe(-usdToMicros(1));
-    expect(ledger.holderBalance(await balanceHash(newBalanceSecret()))).toBeNull();
   });
 });

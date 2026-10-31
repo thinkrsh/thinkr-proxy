@@ -45,6 +45,16 @@ const SCHEMA = `
     micros INTEGER NOT NULL,
     PRIMARY KEY (month, use)
   ) STRICT;
+  CREATE TABLE IF NOT EXISTS spent_passes (
+    pass_hash TEXT PRIMARY KEY,
+    month TEXT NOT NULL
+  ) STRICT;
+  CREATE INDEX IF NOT EXISTS spent_passes_month ON spent_passes (month);
+  CREATE TABLE IF NOT EXISTS pass_months (
+    month TEXT PRIMARY KEY,
+    chats INTEGER NOT NULL,
+    micros INTEGER NOT NULL
+  ) STRICT;
 `;
 
 /** Opens the ledger in `file`, or in memory for ':memory:', and makes its tables when missing. */
@@ -82,6 +92,18 @@ export function openLedger(file: string): Ledger {
   );
   const selectRedeemed = db.prepare('SELECT month, vouchers FROM holder_redeemed ORDER BY month');
   const selectSpent = db.prepare('SELECT month, use, micros FROM holder_spent ORDER BY month, use');
+  const insertPass = db.prepare(
+    'INSERT OR IGNORE INTO spent_passes (pass_hash, month) VALUES (?, ?)',
+  );
+  const deletePass = db.prepare('DELETE FROM spent_passes WHERE pass_hash = ?');
+  const forgetOldPasses = db.prepare('DELETE FROM spent_passes WHERE month < ?');
+  const countPassMonth = db.prepare(
+    'INSERT INTO pass_months (month, chats, micros) VALUES (?, 1, ?) ' +
+      'ON CONFLICT (month) DO UPDATE SET chats = chats + 1, micros = micros + excluded.micros',
+  );
+  const selectPassMonths = db.prepare(
+    'SELECT month, chats, micros FROM pass_months ORDER BY month',
+  );
 
   const transaction = <T>(work: () => T, keep: (result: T) => boolean): T => {
     db.exec('BEGIN IMMEDIATE');
@@ -185,6 +207,21 @@ export function openLedger(file: string): Ledger {
         (settled) => settled,
       );
     },
+    spendPass(passHash, month): RedeemResult {
+      return transaction(
+        (): RedeemResult => {
+          forgetOldPasses.run(month);
+          return insertPass.run(passHash, month).changes === 0 ? 'spent' : 'ok';
+        },
+        () => true,
+      );
+    },
+    restorePass(passHash) {
+      deletePass.run(passHash);
+    },
+    countPass(month, costMicros) {
+      countPassMonth.run(month, costMicros);
+    },
     holderTotals(): HolderTotals {
       return {
         redeemed: selectRedeemed.all().map((row) => ({
@@ -194,6 +231,11 @@ export function openLedger(file: string): Ledger {
         spent: selectSpent.all().map((row) => ({
           month: String(row.month),
           use: useOf(row.use),
+          micros: Number(row.micros),
+        })),
+        passes: selectPassMonths.all().map((row) => ({
+          month: String(row.month),
+          chats: Number(row.chats),
           micros: Number(row.micros),
         })),
       };

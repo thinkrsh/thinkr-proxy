@@ -3,11 +3,13 @@ import { Hono, type Context, type MiddlewareHandler } from 'hono';
 
 import { createAccess } from './access/access.js';
 import { createGate } from './access/gate.js';
+import { createPassBudget } from './access/pass-budget.js';
 import { assertCatalogIsValid } from './catalog.js';
 import type { Env } from './config/env.js';
 import { INFERENCE } from './config/inference.js';
 import type { ErrorCode } from './contract.js';
 import type { Ledger } from './credit/ledger.js';
+import type { PassKeys } from './credit/pass.js';
 import type { SyncStore } from './sync/store.js';
 import type { NoteKeys } from './credit/note-key.js';
 import { MESSAGES } from './config/messages.js';
@@ -43,6 +45,8 @@ export interface AppDeps {
   readonly ledger: Ledger;
   /** Check the blind notes of credit: the public keys of the issuer (apps/issuer/). */
   readonly noteKeys: NoteKeys;
+  /** Check the passes of the free chats of a holder: public keys of the issuer, one for each month. */
+  readonly passKeys: PassKeys;
   /** The secret that seals the tickets of video jobs. */
   readonly ticketKey: Uint8Array;
   /** The encrypted backups of the app, which the proxy cannot read. */
@@ -54,7 +58,13 @@ export function createApp(deps: AppDeps): Hono {
   const app = new Hono().basePath(SERVER.basePath);
   app.use(requestLog(deps), noStore);
   const access = createAccess(deps.env.accessMode, deps.log);
-  const gate = createGate({ access, ledger: deps.ledger, now: deps.now });
+  const gate = createGate({
+    access,
+    ledger: deps.ledger,
+    now: deps.now,
+    passKeys: deps.passKeys,
+    passBudget: createPassBudget(deps.log),
+  });
   app.route('/', createHealthRoute());
   app.route('/', createModelsRoute({ access, gate }));
   app.route('/', createAccessRoute({ ...deps, access, gate }));

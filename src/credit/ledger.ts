@@ -21,6 +21,12 @@ export interface HolderTotals {
     readonly use: CreditUse;
     readonly micros: number;
   }[];
+  /** The free chats of holders by month, and what they cost at the provider, in millionths. */
+  readonly passes: readonly {
+    readonly month: string;
+    readonly chats: number;
+    readonly micros: number;
+  }[];
 }
 
 export type RedeemResult = 'ok' | 'spent';
@@ -64,6 +70,15 @@ export interface Ledger {
    * a call whose answer was lost can run again. It keeps the hash alone, never the two balances.
    */
   moveCredit: (moveHash: string, fromHash: string, intoHash: string, micros: number) => MoveResult;
+  /**
+   * Spends the pass of a free chat of a holder (31 Oct 2026), keeping its hash and the month of its
+   * key alone, and forgets the passes of months before, whose keys the proxy no longer takes.
+   */
+  spendPass: (passHash: string, month: string) => RedeemResult;
+  /** Gives a pass back, when the enclave failed before the answer started. */
+  restorePass: (passHash: string) => void;
+  /** Counts one free chat that went through, and what it cost at the provider, by month. */
+  countPass: (month: string, costMicros: number) => void;
   /**
    * Settles a video job that a balance paid ahead (the owner, 23 Oct 2026), once: records the hash
    * of the job, and gives `refundMicros` back to the balance (less than zero takes more). False when

@@ -61,7 +61,7 @@ interface Day {
 
 const TRIAL_MODELS: ReadonlySet<string> = new Set(trialModelIds());
 
-function utcDay(nowMs: number): string {
+export function utcDay(nowMs: number): string {
   return new Date(nowMs).toISOString().slice(0, 'YYYY-MM-DD'.length);
 }
 

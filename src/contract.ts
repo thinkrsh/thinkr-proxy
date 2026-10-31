@@ -23,6 +23,10 @@ export const ERROR_CODES = [
   'voucher_spent',
   'balance_unknown',
   'balance_low',
+  'pass_invalid',
+  'pass_spent',
+  'pass_paused',
+  'pass_too_long',
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
@@ -225,6 +229,8 @@ export interface ModelInfo {
   vision: boolean;
   /** False: the app shows the model locked ("Soon"). */
   available: boolean;
+  /** A holder of 1M THKR chats with this model free (config/holderPass.ts, 31 Oct 2026). */
+  holderFree: boolean;
   /**
    * What a million tokens cost the user: the price of the model (decision 132), or else its cost
    * at the provider plus 25% (decision 52).
@@ -373,6 +379,8 @@ export type MergeRequest = z.infer<typeof mergeRequestSchema>;
 export interface HolderTotalsResponse {
   redeemed: { month: string; vouchers: number }[];
   spent: { month: string; use: 'chat' | 'image' | 'video'; usd: number }[];
+  /** The free chats of holders by month, and what they cost at the provider. */
+  passes: { month: string; chats: number; costUsd: number }[];
 }
 
 export interface MergeResponse {

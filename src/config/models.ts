@@ -57,7 +57,14 @@ import type {
  */
 export type CatalogInfo = Omit<
   ModelInfo,
-  'pricing' | 'media' | 'audio' | 'sourced' | 'alwaysThinks' | 'thinksInFull' | 'webSearch'
+  | 'pricing'
+  | 'media'
+  | 'audio'
+  | 'sourced'
+  | 'alwaysThinks'
+  | 'thinksInFull'
+  | 'webSearch'
+  | 'holderFree'
 >;
 
 /**

@@ -1,9 +1,11 @@
 // Who pays for a chat: a balance that the request names in the balance header (decision 48), or
 // else the free trial of the visitor (decision 67). A paid chat skips the limits and the locks of
 // the trial, and its balance must cover the input and a reserve for the answer before it starts.
+// In the private lane, a pass of a holder pays a free chat (31 Oct 2026, config/holderPass.ts).
 import type { Context } from 'hono';
 
 import { CREDIT } from '../config/credit.js';
+import { HOLDER_PASS, isHolderFree } from '../config/holderPass.js';
 import type { CatalogModel } from '../config/models.js';
 import { MESSAGES } from '../config/messages.js';
 import {
@@ -17,10 +19,12 @@ import {
   type PremiumPrice,
 } from '../credit/balance.js';
 import type { Ledger } from '../credit/ledger.js';
+import { checkPass, type HolderPass, type PassKeys } from '../credit/pass.js';
 import type { Lane } from '../contract.js';
 import type { ChatSpend } from '../lib/cost.js';
 import { ProxyError } from '../lib/errors.js';
 import { assertOpen, type Access } from './access.js';
+import type { PassBudget } from './pass-budget.js';
 
 /** A balance that a request names, with what was left on it when the request came in. */
 export interface Balance {
@@ -32,6 +36,8 @@ export interface Payer {
   /** The key of the visitor, for the free trial. Never the address itself. */
   readonly visitor: string;
   readonly balance: Balance | null;
+  /** The pass of a holder that pays this chat, ahead of a balance and the free trial. */
+  readonly pass?: HolderPass | null;
 }
 
 /** One admitted chat. */
@@ -121,6 +127,8 @@ const FREE_PREPAID: PrepaidTicket = { pay: () => ({ balanceHash: null, micros: 0
 export interface Gate {
   /** The balance named by the request, or null. Throws `balance_unknown` for one that is not. */
   balanceOf: (c: Context) => Promise<Balance | null>;
+  /** The pass of a holder named by the request, or null. Throws `pass_invalid` for a false one. */
+  passOf: (c: Context) => Promise<HolderPass | null>;
   /**
    * Admits a chat with a model whose lane and availability were checked, or throws. `inputUnits`
    * is the size of the chat: its characters, or the bytes of a sealed body.
@@ -160,6 +168,9 @@ export interface GateDeps {
   readonly access: Access;
   readonly ledger: Ledger;
   readonly now: () => number;
+  /** Check the passes of holders: the public keys of the issuer, one for each month. */
+  readonly passKeys: PassKeys;
+  readonly passBudget: PassBudget;
 }
 
 export function createGate(deps: GateDeps): Gate {
@@ -175,8 +186,15 @@ export function createGate(deps: GateDeps): Gate {
       if (micros === null) throw new ProxyError('balance_unknown', MESSAGES.balanceUnknown);
       return { hash, micros };
     },
+    async passOf(c) {
+      const header = c.req.header(HOLDER_PASS.header);
+      return header === undefined ? null : checkPass(deps.passKeys, header, deps.now());
+    },
     admit(payer, model, inputUnits, options = PLAIN_CHAT) {
-      const { balance } = payer;
+      const { balance, pass } = payer;
+      if (pass !== undefined && pass !== null) {
+        return admitOnPass(deps, pass, model, inputUnits, options);
+      }
       if (balance === null) {
         if (options.creditOnly === true && deps.access.mode !== 'full') {
           throw new ProxyError(
@@ -280,6 +298,41 @@ function admitVoiceOnTrial(deps: GateDeps, visitor: string, trial: TrialTerms): 
     },
     charge: (reportedCostUsd) => {
       deps.access.spend('private', reportedCostUsd ?? trial.costUsd, deps.now());
+    },
+  };
+}
+
+/**
+ * A free chat of a holder: one pass pays it, and the proxy pays the provider, up to the budget of the
+ * day. The app sends a pass only with a model of free chats and no web search. Its other refusals
+ * leave the pass unspent, and the app sends the chat again on credit or the free trial.
+ */
+function admitOnPass(
+  deps: GateDeps,
+  pass: HolderPass,
+  model: CatalogModel,
+  inputUnits: number,
+  options: ChatOptions,
+): ChatTicket {
+  if (!isHolderFree(model.info.id) || options.webSearch) {
+    throw new ProxyError('model_unavailable', MESSAGES.passModel);
+  }
+  if (reserveMicros(model, inputUnits) > usdToMicros(HOLDER_PASS.maxChatUsd)) {
+    throw new ProxyError('pass_too_long', MESSAGES.passTooLong);
+  }
+  if (deps.passBudget.paused(deps.now())) {
+    throw new ProxyError('pass_paused', MESSAGES.passPaused);
+  }
+  if (deps.ledger.spendPass(pass.hash, pass.month) === 'spent') {
+    throw new ProxyError('pass_spent', MESSAGES.passSpent);
+  }
+  return {
+    refund: () => {
+      deps.ledger.restorePass(pass.hash);
+    },
+    charge: (spend) => {
+      deps.passBudget.spend(spend.costUsd, deps.now());
+      deps.ledger.countPass(pass.month, usdToMicros(spend.costUsd));
     },
   };
 }

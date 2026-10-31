@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { createAccess, type Access } from '../src/access/access.js';
 import { createGate } from '../src/access/gate.js';
+import { createPassBudget } from '../src/access/pass-budget.js';
 import { CREDIT } from '../src/config/credit.js';
 import { MESSAGES } from '../src/config/messages.js';
 import { SERVER } from '../src/config/server.js';
@@ -275,7 +276,13 @@ describe('createGate, Voice on the free trial (26 Oct 2026)', () => {
         real.spend(lane, usd, nowMs);
       },
     };
-    return createGate({ access, ledger: openLedger(':memory:'), now: () => Date.now() });
+    return createGate({
+      access,
+      ledger: openLedger(':memory:'),
+      now: () => Date.now(),
+      passKeys: new Map(),
+      passBudget: createPassBudget(() => undefined),
+    });
   }
 
   it('counts the fee of Tinfoil without a report, else the cost that the enclave reports', () => {

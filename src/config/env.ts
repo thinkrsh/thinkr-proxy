@@ -24,6 +24,11 @@ const envSchema = z.object({
    */
   HOLDER_PUBLIC_KEYS_FILE: z.string().trim().min(1),
   /**
+   * The public keys of the passes of free chats (31 Oct 2026), one for each month, as JSON: what
+   * `npm run holder-keys -- public` of apps/issuer prints for the folder of those keys.
+   */
+  PASS_PUBLIC_KEYS_FILE: z.string().trim().min(1),
+  /**
    * The public keys of the notes of change, as JSON from `npm run change-keys -- public` of
    * apps/issuer. Unset, the proxy takes no note of change: no coin of top-ups is open.
    */
@@ -51,6 +56,7 @@ export interface Env {
   readonly clientAddressHeader: string | null;
   readonly notePublicKeyFile: string;
   readonly holderPublicKeysFile: string;
+  readonly passPublicKeysFile: string;
   readonly changePublicKeysFile: string | null;
   readonly ticketKeyFile: string;
   readonly databaseFile: string;
@@ -79,6 +85,7 @@ export function readEnv(source: EnvSource): Env {
     clientAddressHeader: result.data.CLIENT_ADDRESS_HEADER ?? null,
     notePublicKeyFile: result.data.VOUCHER_PUBLIC_KEY_FILE,
     holderPublicKeysFile: result.data.HOLDER_PUBLIC_KEYS_FILE,
+    passPublicKeysFile: result.data.PASS_PUBLIC_KEYS_FILE,
     changePublicKeysFile: result.data.CHANGE_PUBLIC_KEYS_FILE ?? null,
     ticketKeyFile: result.data.TICKET_KEY_FILE,
     databaseFile: result.data.DATABASE_FILE,

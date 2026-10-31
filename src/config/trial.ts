@@ -24,8 +24,12 @@ export const TRIAL = {
    * one of GPT Image 1 about $0.31.
    */
   dearest: { chatUsd: 0.02, imageUsd: 0.2 },
-  /** Chats that one visitor may send in a day, in each lane. */
-  chatsPerDay: { private: 10, open: 10 },
+  /**
+   * Chats that one visitor may send in a day, in each lane: 10 until the owner, 31 Oct 2026: "kurangin
+   * dari trial 10x chat jadi cuman 3", as a holder of 1M THKR now chats free (config/holderPass.ts).
+   * Must match `trialChatsPerDay` of apps/site-v2/src/config/pricing.ts and the docs.
+   */
+  chatsPerDay: { private: 3, open: 3 },
   /**
    * What the trial of a lane may cost in a day, in USD. Past it, the lane pauses until 00:00 UTC.
    * The private lane went from $2 to $5 with Voice on the trial (the owner, 26 Oct 2026: "budget
@@ -38,8 +42,8 @@ export const TRIAL = {
   /**
    * Requests of Voice that one visitor may send in a day on the trial (26 Oct 2026): recordings
    * and parts of answers to speak. Each turn of Voice mode is one recording, one chat of the private
-   * lane, and a few parts read aloud, so ten turns fit, while one visitor cannot spend the budget
-   * of the lane on speech alone (at $0.002 a part at Tinfoil, 60 parts cost $0.12).
+   * lane, and a few parts read aloud, so the chats of a day run out first, while one visitor cannot
+   * spend the budget of the lane on speech alone (at $0.002 a part at Tinfoil, 60 parts cost $0.12).
    */
   voiceRequestsPerDay: 60,
   /**

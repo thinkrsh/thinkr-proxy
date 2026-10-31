@@ -19,6 +19,10 @@ export const ERROR_STATUS = {
   voucher_spent: 409,
   balance_unknown: 401,
   balance_low: 402,
+  pass_invalid: 400,
+  pass_spent: 409,
+  pass_paused: 429,
+  pass_too_long: 413,
 } as const satisfies Record<ErrorCode, ContentfulStatusCode>;
 
 export class ProxyError extends Error {

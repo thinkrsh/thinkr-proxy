@@ -85,6 +85,7 @@ export function createPrivateRoute(deps: PrivateRouteDeps): Hono {
       forwardSealedChat(deps, c, async (visitor) => ({
         visitor,
         balance: await deps.gate.balanceOf(c),
+        pass: await deps.gate.passOf(c),
       })),
     )
     .post(TINFOIL.convertFilePath, sizeLimit(SERVER.maxSealedFileBytes), async (c) => {
@@ -130,8 +131,9 @@ export function createPrivateRoute(deps: PrivateRouteDeps): Hono {
 }
 
 /**
- * Who pays for one sealed chat, once its headers have passed: in the private lane, the balance that
- * the request names or else the free trial; in Inference, the holder credit of an API key.
+ * Who pays for one sealed chat, once its headers have passed: in the private lane, the pass of a
+ * holder, the balance that the request names, or else the free trial; in Inference, the holder
+ * credit of an API key.
  */
 export type SealedChatPayer = (visitor: string) => Promise<Payer>;
 

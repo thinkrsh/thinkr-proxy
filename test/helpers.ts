@@ -56,6 +56,11 @@ export const TEST_NOTE_KEYS = noteKeysOf(
   new Map([[10, TEST_CHANGE_KEY]]),
 );
 
+/** The key of the passes of free chats of October 2026. */
+export const TEST_PASS_MONTH = '2026-10';
+export const TEST_PASS_KEY = testKey();
+export const TEST_PASS_KEYS = new Map([[TEST_PASS_MONTH, TEST_PASS_KEY]]);
+
 /** Signs one blinded note with a key, as the issuer does (apps/issuer/src/node/note-key.ts). */
 export function issuerBlindSign(key: NoteKey, blinded: Uint8Array): Uint8Array {
   const privateKey = PRIVATE_KEYS.get(key.keyId);
@@ -171,6 +176,7 @@ export function createTestApp(
       clientAddressHeader: null,
       notePublicKeyFile: 'unused-in-tests.pem',
       holderPublicKeysFile: 'unused-in-tests.json',
+      passPublicKeysFile: 'unused-in-tests.json',
       changePublicKeysFile: null,
       ticketKeyFile: 'unused-in-tests.txt',
       databaseFile: ':memory:',
@@ -178,6 +184,7 @@ export function createTestApp(
     },
     ledger,
     noteKeys: TEST_NOTE_KEYS,
+    passKeys: TEST_PASS_KEYS,
     ticketKey: TEST_TICKET_KEY,
     syncStore,
     fetch: fetchMock,

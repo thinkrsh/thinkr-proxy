@@ -2,6 +2,7 @@
 import type { Access } from './access/access.js';
 import { AUDIO_TOOLS, type AudioTools } from './config/audioTools.js';
 import { CREDIT } from './config/credit.js';
+import { HOLDER_PASS, isHolderFree } from './config/holderPass.js';
 import { IMAGE_TOOLS, PHOTO_LIMIT, type ImageTools } from './config/imageTools.js';
 import {
   DEFAULT_MODEL_ID,
@@ -91,6 +92,7 @@ function listedModel(model: CatalogModel, access: Pick<Access, 'opens'>): Listed
         ? sourcedInfo(model.media, findSourcedTools(info.id))
         : null,
     available: lockReason === null,
+    holderFree: isHolderFree(info.id),
     lockReason,
   };
 }
@@ -399,6 +401,19 @@ export function trialProblems(
   return problems;
 }
 
+/** The models of the free chats of a holder must be models of text of the private lane, served. */
+export function holderPassProblems(
+  catalog: readonly CatalogModel[],
+  modelIds: readonly string[],
+): string[] {
+  return modelIds.flatMap((id) => {
+    const model = catalog.find((candidate) => candidate.info.id === id);
+    return model?.info.available && model.info.lane === 'private' && model.info.kind === 'text'
+      ? []
+      : [`free chat model ${id} cannot be served`];
+  });
+}
+
 /**
  * Every image model has its tools and nothing else has any; a model with sizes holds its default
  * size among them, at the cost that the catalog gives one image of it (25 Oct 2026).
@@ -656,6 +671,7 @@ export function assertCatalogIsValid(): void {
   const problems = [
     ...catalogProblems(MODEL_CATALOG, DEFAULT_MODEL_ID),
     ...trialProblems(MODEL_CATALOG, DEFAULT_MODEL_ID, trialModelIds()),
+    ...holderPassProblems(MODEL_CATALOG, HOLDER_PASS.modelIds),
     ...imageToolsProblems(MODEL_CATALOG, IMAGE_TOOLS),
     ...videoToolsProblems(MODEL_CATALOG, VIDEO_TOOLS),
     ...audioToolsProblems(MODEL_CATALOG, AUDIO_TOOLS),

@@ -30,6 +30,7 @@ const noteKeys = noteKeysOf(
     ? new Map()
     : changeKeysFromJson(readFileSync(env.changePublicKeysFile, 'utf8')),
 );
+const passKeys = holderKeysFromJson(readFileSync(env.passPublicKeysFile, 'utf8'));
 const ticketKey = readTicketKey(env.ticketKeyFile);
 const ledger = openLedger(env.databaseFile);
 const syncStore = openSyncStore(join(dirname(env.databaseFile), SYNC.databaseFileName));
@@ -75,6 +76,7 @@ const app = createApp({
   log: writeLogLine,
   ledger,
   noteKeys,
+  passKeys,
   ticketKey,
   syncStore,
 });

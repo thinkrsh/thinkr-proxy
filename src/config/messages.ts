@@ -47,6 +47,12 @@ export const MESSAGES = {
   keyChanged: 'The key of the vouchers changed. Start the top-up again.',
   noteInvalid: 'This voucher is not valid.',
   noteSpent: 'This voucher was spent before.',
+  /** The free chats of a holder (31 Oct 2026). The app answers each by itself. */
+  passInvalid: 'This free chat is not valid.',
+  passSpent: 'This free chat was used before.',
+  passPaused: 'Free chats are full for today. They open again at 00:00 UTC.',
+  passTooLong: 'This chat is too long for a free chat.',
+  passModel: 'Free chats take the models of free chats, with no web search.',
   balanceUnknown: 'This balance does not exist. Top up to get credit.',
   mergeSame: 'A balance cannot merge into itself.',
   balanceLow: 'Your credit is too low for this chat. Top up to go on.',

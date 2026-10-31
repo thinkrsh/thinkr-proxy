@@ -51,6 +51,7 @@ describe('holder vouchers at the proxy', () => {
     expect((await response.json()) as HolderTotalsResponse).toEqual({
       redeemed: [{ month: TEST_HOLDER_MONTH, vouchers: 2 }],
       spent: [],
+      passes: [],
     });
   });
 });

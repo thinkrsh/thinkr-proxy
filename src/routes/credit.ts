@@ -4,7 +4,7 @@
 // sees a valid note, never who bought or claimed it. POST /api/credit/merge moves one balance
 // onto another, for two devices of one person that share an encrypted backup.
 // GET /api/credit/holder-totals counts the holder vouchers spent and what their credit paid for,
-// by month, with no balance (decision 191).
+// by month, with no balance (decision 191), and the free chats of holders, with no wallet.
 import { Hono, type Context } from 'hono';
 
 import { CREDIT, MAX_TOP_UP_NOTES } from '../config/credit.js';
@@ -91,6 +91,11 @@ export function createCreditRoute(deps: CreditRouteDeps): Hono {
           month: row.month,
           use: row.use,
           usd: microsToUsd(row.micros),
+        })),
+        passes: totals.passes.map((row) => ({
+          month: row.month,
+          chats: row.chats,
+          costUsd: microsToUsd(row.micros),
         })),
       });
     });

@@ -96,7 +96,7 @@ export function createApp(deps: AppDeps): Hono {
   );
   app.route('/', createCreditRoute({ ...deps, limiter }));
   app.route('/', createSyncRoute(deps));
-  // Inference (29 Oct 2026): the API of the private lane, with a limit of its own per client address.
+  // Inference (29 Oct 2026): the API, with a limit of its own per client address.
   const inferenceLimiter = createFixedWindowLimiter({
     limit: INFERENCE.requestsPerWindow,
     windowMs: LIMITS.rateWindowMs,
@@ -109,6 +109,7 @@ export function createApp(deps: AppDeps): Hono {
       limiter: inferenceLimiter,
       gate,
       apiKey: deps.env.tinfoilApiKey,
+      openRouterApiKey: deps.env.openRouterApiKey,
     }),
   );
   app.notFound((c) => c.json(errorBody('invalid_request', MESSAGES.notFound), 404));

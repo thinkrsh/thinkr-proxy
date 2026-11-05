@@ -35,21 +35,22 @@ const deltaSchema = z.object({
   annotations: z.array(annotationSchema).nullish(),
 });
 
+/** The usage of a whole answer, in its last chunk or in the body of an answer with no stream. */
+export const usageSchema = z.object({
+  prompt_tokens: z.number(),
+  completion_tokens: z.number(),
+  cost: z.number().nonnegative().nullish(),
+  server_tool_use_details: z
+    .object({ web_search_requests: z.number().int().nonnegative().nullish() })
+    .nullish(),
+});
+
 const chunkSchema = z.object({
   error: z.unknown().optional(),
   choices: z
     .array(z.object({ delta: deltaSchema.nullish(), finish_reason: z.string().nullish() }))
     .nullish(),
-  usage: z
-    .object({
-      prompt_tokens: z.number(),
-      completion_tokens: z.number(),
-      cost: z.number().nonnegative().nullish(),
-      server_tool_use_details: z
-        .object({ web_search_requests: z.number().int().nonnegative().nullish() })
-        .nullish(),
-    })
-    .nullish(),
+  usage: usageSchema.nullish(),
 });
 
 type UpstreamChunk = z.infer<typeof chunkSchema>;
@@ -62,6 +63,15 @@ export interface AnswerSpend {
   readonly costUsd: number | null;
   /** The searches of the web that the answer ran (29 Oct 2026). */
   readonly webSearches: number;
+}
+
+/** What the usage of an answer says that the answer spent. */
+export function spendOfUsage(usage: z.infer<typeof usageSchema>): AnswerSpend {
+  return {
+    usage: { inputTokens: usage.prompt_tokens, outputTokens: usage.completion_tokens },
+    costUsd: usage.cost ?? null,
+    webSearches: usage.server_tool_use_details?.web_search_requests ?? 0,
+  };
 }
 
 interface StreamProgress {
@@ -189,12 +199,10 @@ function recordProgress(progress: StreamProgress, chunk: UpstreamChunk): void {
   const finishReason = chunk.choices?.[0]?.finish_reason;
   if (finishReason !== undefined && finishReason !== null) progress.finishReason = finishReason;
   if (chunk.usage !== undefined && chunk.usage !== null) {
-    progress.usage = {
-      inputTokens: chunk.usage.prompt_tokens,
-      outputTokens: chunk.usage.completion_tokens,
-    };
-    progress.costUsd = chunk.usage.cost ?? null;
-    progress.webSearches = chunk.usage.server_tool_use_details?.web_search_requests ?? 0;
+    const spend = spendOfUsage(chunk.usage);
+    progress.usage = spend.usage;
+    progress.costUsd = spend.costUsd;
+    progress.webSearches = spend.webSearches;
   }
 }
 

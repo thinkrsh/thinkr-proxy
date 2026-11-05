@@ -25,6 +25,11 @@ This section states what the proxy learns in each part of the app.
   (`data_collection: deny`). At the level Open, each request refuses providers
   that collect data only. Images use both levels. Video uses the level Open
   only, since OpenRouter has no video endpoint with zero data retention.
+- **The API.** At `api.thinkr.sh/v1`, a chat of the private lane comes sealed by
+  the SDK of Thinkr or its local bridge, as in the app. A chat of the levels ZDR
+  and Open comes as plain JSON, which the proxy reads and sends to OpenRouter,
+  with the provider preferences above, whatever the body says. The proxy learns
+  the hash of the API key, and it keeps no copy of a chat.
 - **The credit.** The proxy verifies the signature of each voucher with the
   public key of the issuer
   ([thinkr-issuer](https://github.com/thinkrsh/thinkr-issuer)). A valid voucher
@@ -62,6 +67,7 @@ This section lists the routes of the proxy. Every route lives under `/api`.
 | `POST /images`                              | One image of the open lane.                                |
 | `POST /videos`                              | One video job of the open lane. A balance pays ahead.      |
 | `GET /videos/status`, `GET /videos/content` | The state and the video of a job, named by its ticket.     |
+| `POST /inference/v1/chat/completions`       | One chat of the API: sealed, or plain in ZDR and Open.     |
 | `GET /credit/key`                           | The public key that the app blinds its vouchers with.      |
 | `POST /credit/redeem`                       | One voucher, spent into a balance.                         |
 | `POST /credit/merge`                        | One balance, moved onto another of the same person.        |

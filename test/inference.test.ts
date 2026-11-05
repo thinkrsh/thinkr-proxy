@@ -156,7 +156,7 @@ describe('GET /api/inference/v1/models', () => {
     expect(response.status).toBe(200);
     const body = (await response.json()) as InferenceModelsResponse;
     expect(body.object).toBe('list');
-    const ids = body.data.map((model) => model.id);
+    const ids = body.data.filter((model) => model.mode === 'private').map((model) => model.id);
     expect(ids).toContain(MODEL);
     expect(ids.every((id) => findTeeModel(id)?.info.lane === 'private')).toBe(true);
     const gptOss = body.data.find((model) => model.id === MODEL);

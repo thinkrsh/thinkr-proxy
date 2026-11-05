@@ -1,22 +1,23 @@
-// Thinkr Inference (decision 45): the OpenAI-compatible API of the private lane at api.thinkr.sh/v1.
-// Its SDK verifies the enclave and seals each request, so the proxy forwards ciphertext only, as it
-// does for the app (decision 64). An API key is the secret of a balance of its own, and a chat
-// spends what is on it. GET /v1/models lists the models, GET /v1/attestation passes the proof of the
-// router on, GET /v1/balance tells the credit of a key, POST /v1/keys/fill moves credit onto a key
-// from the balance of the app (the owner, 30 Oct 2026), POST /v1/keys/close stops a key and moves
-// what is left back, POST /v1/keys/redeem spends holder vouchers into a key for the dashboard, and
-// POST /v1/chat/completions forwards a sealed chat, as raw frames or in the text encoding of
-// INFERENCE.bodyEncoding, for a caller such as Postman. A move names the balance and the key in one
-// request, and the ledger and the log keep neither beside the other.
+// Thinkr Inference (decision 45): the OpenAI-compatible API at api.thinkr.sh/v1. For a model of the
+// private lane, its SDK verifies the enclave and seals each request, so the proxy forwards ciphertext
+// only, as it does for the app (decision 64). A model of ZDR or Open takes plain JSON, which the proxy
+// reads and sends to OpenRouter (inference/plain-chat.ts). An API key is the secret of a balance of
+// its own, and a chat spends what is on it. GET /v1/models lists the models, GET /v1/attestation
+// passes the proof of the router on, GET /v1/balance tells the credit of a key, POST /v1/keys/fill
+// moves credit onto a key from the balance of the app (the owner, 30 Oct 2026), POST /v1/keys/close
+// stops a key and moves what is left back, POST /v1/keys/redeem spends holder vouchers into a key for
+// the dashboard, and POST /v1/chat/completions takes a plain chat, or forwards a sealed one, as raw
+// frames or in the text encoding of INFERENCE.bodyEncoding, for a caller such as Postman. A move
+// names the balance and the key in one request, and the ledger and the log keep neither beside the
+// other.
 import { Hono, type Context } from 'hono';
 
 import type { Balance } from '../access/gate.js';
 import { CREDIT } from '../config/credit.js';
 import { INFERENCE } from '../config/inference.js';
 import { MESSAGES } from '../config/messages.js';
-import { MODEL_CATALOG, type CatalogModel } from '../config/models.js';
 import { TINFOIL } from '../config/tinfoil.js';
-import { balanceHash, isBalanceSecret, microsToUsd, userPricing } from '../credit/balance.js';
+import { balanceHash, isBalanceSecret, microsToUsd } from '../credit/balance.js';
 import type { Ledger } from '../credit/ledger.js';
 import { checkNote } from '../credit/redeem.js';
 import type { NoteKeys } from '../credit/note-key.js';
@@ -25,16 +26,18 @@ import {
   keyFillRequestSchema,
   keyRedeemRequestSchema,
   type EncodedChatAnswer,
-  type InferenceModel,
   type InferenceModelsResponse,
   type KeyBalanceResponse,
   type KeyCloseResponse,
   type KeyFillResponse,
   type KeyRedeemResponse,
 } from '../inference/contract.js';
+import { listInferenceModels } from '../inference/models.js';
+import { createOpenChats, startPlainChat, type OpenChats } from '../inference/plain-chat.js';
 import { parseBody, readJson } from '../lib/body.js';
 import { fromBase64Url, toBase64Url } from '../lib/bytes.js';
 import { ProxyError } from '../lib/errors.js';
+import type { LogLine } from '../lib/log.js';
 import { fetchAttestation } from '../tinfoil/attestation.js';
 import { forwardSealedChat, sealedChatLimit, type PrivateRouteDeps } from './private.js';
 
@@ -42,18 +45,19 @@ export interface InferenceRouteDeps extends PrivateRouteDeps {
   readonly ledger: Ledger;
   /** The public keys of the issuer, which check the holder vouchers that fill a key. */
   readonly noteKeys: NoteKeys;
+  /** The key of OpenRouter, for the chats of ZDR and Open. `apiKey` is that of the private lane. */
+  readonly openRouterApiKey: string;
+  readonly log: LogLine;
 }
 
 const BASE64URL = /^[A-Za-z0-9_-]+$/;
 
-/** A model of the private lane that Inference serves: one that takes a chat, with its enclave. */
-type ServedModel = CatalogModel & { readonly info: { readonly teeModelId: string } };
-
 export function createInferenceRoute(deps: InferenceRouteDeps): Hono {
   const models: InferenceModelsResponse = {
     object: 'list',
-    data: MODEL_CATALOG.filter(isServed).map(inferenceModel),
+    data: listInferenceModels(),
   };
+  const openChats = createOpenChats();
   return new Hono()
     .basePath(INFERENCE.basePath)
     .get(INFERENCE.modelsPath, (c) => c.json<InferenceModelsResponse>(models))
@@ -71,13 +75,8 @@ export function createInferenceRoute(deps: InferenceRouteDeps): Hono {
     .post(INFERENCE.fillPath, async (c) => c.json<KeyFillResponse>(await fillKey(deps, c)))
     .post(INFERENCE.closePath, async (c) => c.json<KeyCloseResponse>(await closeKey(deps, c)))
     .post(TINFOIL.chatCompletionsPath, sealedChatLimit(), async (c) => {
-      const encoded = await decodeBody(c);
       try {
-        const answer = await forwardSealedChat(deps, c, async (visitor) => ({
-          visitor,
-          balance: await keyBalance(deps.ledger, c),
-        }));
-        return encoded ? await encodedAnswer(answer) : answer;
+        return isEncrypted(c) ? await encryptedChat(deps, c) : await plainChat(deps, openChats, c);
       } catch (error) {
         // The gate tells a chat to top up, which an API key never does.
         if (error instanceof ProxyError && error.code === 'balance_low') {
@@ -86,6 +85,42 @@ export function createInferenceRoute(deps: InferenceRouteDeps): Hono {
         throw error;
       }
     });
+}
+
+/**
+ * True for a request that the SDK or its local bridge sealed, which names the seal, its encoding, or
+ * the model in its headers. The body of any other request is the chat itself.
+ */
+function isEncrypted(c: Context): boolean {
+  return [
+    TINFOIL.headers.encapsulatedKey,
+    TINFOIL.headers.model,
+    INFERENCE.bodyEncodingHeader,
+  ].some((name) => c.req.header(name) !== undefined);
+}
+
+async function encryptedChat(deps: InferenceRouteDeps, c: Context): Promise<Response> {
+  const encoded = await decodeBody(c);
+  const answer = await forwardSealedChat(deps, c, async (visitor) => ({
+    visitor,
+    balance: await keyBalance(deps.ledger, c),
+  }));
+  return encoded ? encodedAnswer(answer) : answer;
+}
+
+/** A chat of ZDR or Open, or a refusal of a chat of the private lane sent without its seal. */
+async function plainChat(
+  deps: InferenceRouteDeps,
+  openChats: OpenChats,
+  c: Context,
+): Promise<Response> {
+  takeRequest(deps, c);
+  const balance = await keyBalance(deps.ledger, c);
+  return startPlainChat(
+    { ...deps, apiKey: deps.openRouterApiKey, openChats },
+    { visitor: deps.clientKey(c), balance },
+    await readJson(c),
+  );
 }
 
 /**
@@ -213,32 +248,4 @@ function takeRequest(deps: InferenceRouteDeps, c: Context): void {
   if (!deps.limiter.take(deps.clientKey(c), deps.now())) {
     throw new ProxyError('rate_limited', MESSAGES.rateLimited);
   }
-}
-
-function isServed(model: CatalogModel): model is ServedModel {
-  const { info } = model;
-  return (
-    info.lane === 'private' && info.kind === 'text' && info.available && info.teeModelId !== null
-  );
-}
-
-function inferenceModel(model: ServedModel): InferenceModel {
-  const { info } = model;
-  const pricing = userPricing(model);
-  return {
-    id: info.teeModelId,
-    object: 'model',
-    owned_by: info.maker,
-    name: info.name,
-    context_length: info.contextTokens,
-    pricing:
-      pricing === null
-        ? null
-        : {
-            input_usd_per_mtok: pricing.inputUsdPerMTok,
-            output_usd_per_mtok: pricing.outputUsdPerMTok,
-          },
-    vision: info.vision,
-    reasoning: info.reasoning,
-  };
 }

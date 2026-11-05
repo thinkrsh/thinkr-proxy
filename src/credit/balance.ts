@@ -131,11 +131,32 @@ export function reserveMicros(
   if (model.media !== undefined) return usdToMicros(mediaPriceUsd(model.media));
   const pricing = userPricing(model);
   if (pricing === null) return 0;
-  // Photos weigh far more bytes than the tokens they take, so the context bounds the estimate.
-  const inputTokens = Math.min(
-    Math.ceil(inputUnits / CREDIT.charsPerToken),
-    model.info.contextTokens,
-  );
+  const inputTokens = inputTokenEstimate(model, inputUnits);
   const tokens = tokensUsd({ inputTokens, outputTokens: CREDIT.reserveOutputTokens }, pricing);
   return usdToMicros(tokens + (webSearch ? searchReserveUsd(model.info.lane) : 0));
+}
+
+/**
+ * The input tokens of a chat, from its size. Photos weigh far more bytes than the tokens they take,
+ * so the context of the model bounds the estimate.
+ */
+export function inputTokenEstimate(model: Pick<CatalogModel, 'info'>, inputUnits: number): number {
+  return Math.min(Math.ceil(inputUnits / CREDIT.charsPerToken), model.info.contextTokens);
+}
+
+/**
+ * The most output tokens that some credit pays after the input of a chat, at the price that the
+ * user pays. Null for a model whose output has no price.
+ */
+export function affordableOutputTokens(
+  model: Pick<CatalogModel, 'cost' | 'price' | 'info'>,
+  inputUnits: number,
+  micros: number,
+): number | null {
+  const pricing = userPricing(model);
+  if (pricing === null || pricing.outputUsdPerMTok <= 0) return null;
+  const inputTokens = inputTokenEstimate(model, inputUnits);
+  const inputUsd = tokensUsd({ inputTokens, outputTokens: 0 }, pricing);
+  const outputTokenUsd = tokensUsd({ inputTokens: 0, outputTokens: 1 }, pricing);
+  return Math.max(0, Math.floor((microsToUsd(micros) - inputUsd) / outputTokenUsd));
 }

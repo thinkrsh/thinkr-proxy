@@ -65,6 +65,23 @@ export function contentParts(text: string, images: readonly string[]): ContentPa
   return parts;
 }
 
+/** Posts one chat completion to OpenRouter, with the key of Thinkr and nothing that names a user. */
+export function postChatCompletion(
+  deps: UpstreamDeps,
+  body: unknown,
+  signal: AbortSignal,
+): Promise<Response> {
+  return deps.fetch(`${OPENROUTER.baseUrl}${OPENROUTER.chatCompletionsPath}`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${deps.apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+    signal,
+  });
+}
+
 export class UpstreamChat {
   private readonly lifetime: UpstreamLifetime;
 
@@ -114,15 +131,7 @@ export class UpstreamChat {
   }
 
   private send(): Promise<Response> {
-    return this.deps.fetch(`${OPENROUTER.baseUrl}${OPENROUTER.chatCompletionsPath}`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${this.deps.apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(upstreamBody(this.request)),
-      signal: this.lifetime.signal,
-    });
+    return postChatCompletion(this.deps, upstreamBody(this.request), this.lifetime.signal);
   }
 
   private async answerBody(response: Response): Promise<ReadableStream<Uint8Array>> {

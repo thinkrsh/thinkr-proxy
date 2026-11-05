@@ -55,16 +55,22 @@ export const TINFOIL = {
    * What Tinfoil charges beyond tokens (`requestPrice` in api.tinfoil.sh/api/config/models, read
    * 22 Oct 2026): web search, once for each answer that searched, and one document converted. Read
    * on 23 Oct 2026: one recording at $0.01, the fee of the model of voice input before Voxtral Small
-   * 24B, which costs tokens and was reported at $0 that day; one text to Voxtral TTS; and one text to
-   * the privacy filter.
+   * 24B, which costs tokens and was reported at $0 that day; one text to each speech model; and one
+   * text to the privacy filter. The speech models as their usage metrics reported them on 5 Nov
+   * 2026: Voxtral TTS $0.002 and Qwen3 TTS $0.01 a text.
    */
   fees: {
     webSearchUsd: 0.05,
     documentUsd: 0.05,
     transcriptionUsd: 0.01,
-    speechUsd: 0.002,
+    speechUsd: { 'voxtral-tts': 0.002, 'qwen3-tts': 0.01 },
     privacyFilterUsd: 0.005,
   },
+  /**
+   * The speech model of a part sent with no model header: an app from before the choice of a voice
+   * (5 Nov 2026), which spoke with Voxtral TTS only.
+   */
+  defaultSpeechModel: 'voxtral-tts',
   /** Headers of the SDK that the proxy passes on to the attestation service. */
   sdkHeaders: ['Tinfoil-SDK', 'Tinfoil-SDK-Version'],
   /** The media type of an EHBP error, such as a rotated key, which the SDK reads in plain text. */
@@ -90,3 +96,6 @@ export const TINFOIL = {
   /** Time allowed for the privacy filter, which reads one message. */
   privacyFilterTimeoutMs: 30_000,
 } as const;
+
+/** A speech model of the router that speaks Voice replies and calls (5 Nov 2026). */
+export type SpeechModelId = keyof typeof TINFOIL.fees.speechUsd;

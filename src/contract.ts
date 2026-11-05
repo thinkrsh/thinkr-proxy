@@ -270,8 +270,10 @@ export interface ExtraPrices {
    * when it has no price of its own and costs what the enclave reports, less 25%.
    */
   voiceInputUsd: number;
-  /** For each part of an answer spoken. */
+  /** For each part of an answer spoken by the speech model of an app that names none: Voxtral TTS. */
   voiceReplyUsd: number;
+  /** For each part of an answer spoken, by speech model (5 Nov 2026). */
+  voiceReplyUsdByModel: Record<string, number>;
   /** For each message through the privacy filter. */
   privacyFilterUsd: number;
 }

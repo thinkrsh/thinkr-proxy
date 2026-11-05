@@ -41,6 +41,8 @@ interface PremiumRoute {
   readonly onTrial: boolean;
   /** A recording needs a chat of the private lane left on the trial, for its answer. */
   readonly needsChat: boolean;
+  /** Headers that the app adds, such as the speech model of a part to speak (5 Nov 2026). */
+  readonly headers?: Record<string, string>;
 }
 
 const ROUTES: readonly PremiumRoute[] = [
@@ -57,17 +59,30 @@ const ROUTES: readonly PremiumRoute[] = [
     needsChat: true,
   },
   {
-    name: 'a part of an answer to speak',
+    name: 'a part of an answer to speak, from an app that names no speech model',
     path: `/api/private${TINFOIL.speechPath}`,
     enclave: ROUTER,
     upstreamPath: TINFOIL.speechPath,
     contentType: 'application/json',
-    priceUsd: CREDIT.voiceReplyUsd,
+    priceUsd: CREDIT.voiceReplyUsd[TINFOIL.defaultSpeechModel],
     costShare: CREDIT.markup,
-    feeUsd: TINFOIL.fees.speechUsd,
+    feeUsd: TINFOIL.fees.speechUsd[TINFOIL.defaultSpeechModel],
     onTrial: true,
     needsChat: false,
   },
+  ...(['voxtral-tts', 'qwen3-tts'] as const).map((model) => ({
+    name: `a part of an answer to speak with ${model}`,
+    path: `/api/private${TINFOIL.speechPath}`,
+    enclave: ROUTER,
+    upstreamPath: TINFOIL.speechPath,
+    contentType: 'application/json',
+    priceUsd: CREDIT.voiceReplyUsd[model],
+    costShare: CREDIT.markup,
+    feeUsd: TINFOIL.fees.speechUsd[model],
+    onTrial: true,
+    needsChat: false,
+    headers: { [TINFOIL.headers.model]: model },
+  })),
   {
     name: 'a message for the privacy filter',
     path: `/api/private${SERVER.privacyFilterPath}${TINFOIL.privacyFilter.redactPath}`,
@@ -112,6 +127,7 @@ function postPremium(
         'Content-Type': route.contentType,
         [TINFOIL.headers.encapsulatedKey]: 'ab'.repeat(32),
         [TINFOIL.headers.enclaveUrl]: route.enclave,
+        ...route.headers,
         ...headers,
       },
       body: SEALED_BODY,
@@ -145,9 +161,30 @@ describe('the prices of Premium', () => {
     const { extras } = (await (await testApp.app.request('/api/models')).json()) as ModelsResponse;
     expect(extras).toMatchObject({
       voiceInputUsd: CREDIT.voiceInputUsd,
-      voiceReplyUsd: CREDIT.voiceReplyUsd,
+      voiceReplyUsd: CREDIT.voiceReplyUsd[TINFOIL.defaultSpeechModel],
+      voiceReplyUsdByModel: { 'voxtral-tts': 0.0025, 'qwen3-tts': 0.0125 },
       privacyFilterUsd: CREDIT.privacyFilterUsd,
     });
+  });
+
+  it('prices every speech model that Tinfoil charges for, and no other', () => {
+    expect(Object.keys(CREDIT.voiceReplyUsd).sort()).toEqual(
+      Object.keys(TINFOIL.fees.speechUsd).sort(),
+    );
+  });
+
+  it('refuses a part to speak that names a speech model it does not price', async () => {
+    const testApp = appAnswering(() => sealedAnswer());
+    const secret = await fundedBalance(testApp.ledger, 1);
+    const [speech] = ROUTES.filter((route) => route.upstreamPath === TINFOIL.speechPath);
+    if (speech === undefined) throw new Error('No speech route in the table.');
+    const response = await postPremium(testApp, speech, {
+      ...balanceHeader(secret),
+      [TINFOIL.headers.model]: 'kokoro-tts',
+    });
+    expect(response.status).toBe(404);
+    expect((await errorOf(response)).code).toBe('unknown_model');
+    expect(testApp.fetchMock).not.toHaveBeenCalled();
   });
 });
 
@@ -265,7 +302,7 @@ describe.each(VOICE_ROUTES)('POST $path, Voice on the free trial (26 Oct 2026)',
 
 describe('createGate, Voice on the free trial (26 Oct 2026)', () => {
   const PRICE = { fixedUsd: 0, costShare: 1 };
-  const TERMS = { costUsd: TINFOIL.fees.speechUsd, needsChat: false };
+  const TERMS = { costUsd: TINFOIL.fees.speechUsd['voxtral-tts'], needsChat: false };
 
   function gateCounting(spent: number[]): ReturnType<typeof createGate> {
     const real = createAccess('trial', () => undefined);
@@ -290,7 +327,7 @@ describe('createGate, Voice on the free trial (26 Oct 2026)', () => {
     const gate = gateCounting(spent);
     gate.admitPremium({ visitor: 'a', balance: null }, PRICE, TERMS).charge(null);
     gate.admitPremium({ visitor: 'a', balance: null }, PRICE, TERMS).charge(0.004);
-    expect(spent).toEqual([TINFOIL.fees.speechUsd, 0.004]);
+    expect(spent).toEqual([TINFOIL.fees.speechUsd['voxtral-tts'], 0.004]);
   });
 
   it('counts nothing for a request that the enclave failed', () => {
@@ -301,7 +338,7 @@ describe('createGate, Voice on the free trial (26 Oct 2026)', () => {
 });
 
 describe('the enclave of the privacy filter', () => {
-  const filterRoute = ROUTES[2];
+  const filterRoute = ROUTES.find((route) => route.enclave === FILTER);
   if (filterRoute === undefined) throw new Error('The routes lost the privacy filter.');
 
   it('forwards to that enclave only, never to the router', async () => {

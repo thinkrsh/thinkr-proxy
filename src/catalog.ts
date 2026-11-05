@@ -23,6 +23,7 @@ import {
   REASONING,
   type ReasoningRequest,
 } from './config/thinking.js';
+import { TINFOIL } from './config/tinfoil.js';
 import { TRIAL } from './config/trial.js';
 import { VIDEO_TOOLS, type VideoTools } from './config/videoTools.js';
 import { NO_WEB_SEARCH } from './config/webSearch.js';
@@ -70,7 +71,8 @@ export function modelsResponse(
       openWebSearchUsd: CREDIT.openWebSearchUsd,
       documentUsd: CREDIT.documentUsd,
       voiceInputUsd: CREDIT.voiceInputUsd,
-      voiceReplyUsd: CREDIT.voiceReplyUsd,
+      voiceReplyUsd: CREDIT.voiceReplyUsd[TINFOIL.defaultSpeechModel],
+      voiceReplyUsdByModel: { ...CREDIT.voiceReplyUsd },
       privacyFilterUsd: CREDIT.privacyFilterUsd,
     },
   };

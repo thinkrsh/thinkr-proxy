@@ -17,7 +17,7 @@ import { CREDIT } from '../config/credit.js';
 import type { CatalogModel } from '../config/models.js';
 import { MESSAGES } from '../config/messages.js';
 import { SERVER } from '../config/server.js';
-import { TINFOIL } from '../config/tinfoil.js';
+import { TINFOIL, type SpeechModelId } from '../config/tinfoil.js';
 import { readJson } from '../lib/body.js';
 import { answerSpend } from '../lib/cost.js';
 import { ProxyError, errorBody } from '../lib/errors.js';
@@ -62,7 +62,28 @@ function fixedPremium(fixedUsd: number): PremiumPrice {
  * of the enclave, each counts the fee of Tinfoil against the budget of the lane.
  */
 const VOICE_INPUT_TRIAL: TrialTerms = { costUsd: TINFOIL.fees.transcriptionUsd, needsChat: true };
-const VOICE_REPLY_TRIAL: TrialTerms = { costUsd: TINFOIL.fees.speechUsd, needsChat: false };
+
+/**
+ * The speech model of a part to speak, from the header of the app (5 Nov 2026), which the proxy
+ * reads only to hold its price: the enclave reports the cost of the model that the sealed body
+ * names, and the balance pays that plus 25% when it is more. The router does not refuse a header
+ * that names another model (checked 5 Nov 2026), so the header is never sent on.
+ */
+function speechModelOf(header: string | undefined): SpeechModelId {
+  if (header === undefined) return TINFOIL.defaultSpeechModel;
+  if (!Object.hasOwn(TINFOIL.fees.speechUsd, header)) {
+    throw new ProxyError('unknown_model', MESSAGES.unknownModel);
+  }
+  return header as SpeechModelId;
+}
+
+/** The price of a part spoken by this model, and its terms on the free trial. */
+function speechTerms(model: SpeechModelId): { price: PremiumPrice; trial: TrialTerms } {
+  return {
+    price: fixedPremium(CREDIT.voiceReplyUsd[model]),
+    trial: { costUsd: TINFOIL.fees.speechUsd[model], needsChat: false },
+  };
+}
 
 export interface PrivateRouteDeps extends SealedDeps, AttestationDeps {
   readonly now: () => number;
@@ -112,9 +133,10 @@ export function createPrivateRoute(deps: PrivateRouteDeps): Hono {
     .post(TINFOIL.transcriptionPath, sizeLimit(SERVER.maxSealedAudioBytes), (c) =>
       forwardPremium(deps, c, TRANSCRIPTION_ROUTE, VOICE_INPUT_PRICE, VOICE_INPUT_TRIAL),
     )
-    .post(TINFOIL.speechPath, sizeLimit(SERVER.maxBodyBytes), (c) =>
-      forwardPremium(deps, c, SPEECH_ROUTE, fixedPremium(CREDIT.voiceReplyUsd), VOICE_REPLY_TRIAL),
-    )
+    .post(TINFOIL.speechPath, sizeLimit(SERVER.maxBodyBytes), (c) => {
+      const { price, trial } = speechTerms(speechModelOf(c.req.header(TINFOIL.headers.model)));
+      return forwardPremium(deps, c, SPEECH_ROUTE, price, trial);
+    })
     .post(
       `${SERVER.privacyFilterPath}${TINFOIL.privacyFilter.redactPath}`,
       sizeLimit(SERVER.maxSealedFilterBytes),

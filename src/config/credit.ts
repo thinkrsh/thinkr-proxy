@@ -53,9 +53,10 @@ export const CREDIT = {
    * The Premium of the private lane, which only a balance pays (the owner, 23 Oct 2026: "jadi
    * nanti user kita bisa pake premium akses di chat nya"). One part of an answer spoken and one
    * message through the privacy filter cost the fee of Tinfoil in config/tinfoil.ts plus 25%
-   * (decision 52), or the cost that the enclave reports plus 25% when that is more.
+   * (decision 52), or the cost that the enclave reports plus 25% when that is more. A part spoken
+   * costs by its speech model (the owner, 5 Nov 2026: more voices, from Voxtral TTS and Qwen3 TTS).
    */
-  voiceReplyUsd: 0.0025,
+  voiceReplyUsd: { 'voxtral-tts': 0.0025, 'qwen3-tts': 0.0125 },
   privacyFilterUsd: 0.00625,
   /**
    * One recording turned into text costs what Tinfoil reports for it, less 25%, with no price of
